@@ -1,0 +1,8 @@
+black==19.10b0
+mypy==0.740
+mypy-extensions==0.4.2
+pytest==5.2.2
+flake8==3.7.9
+ipdb==0.12.2
+ipython==7.8.0
+Faker==2.0.3

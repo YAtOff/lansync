@@ -1,0 +1,25 @@
+# IDE
+.idea/
+.vscode/
+
+# Package manager
+venv/
+package-lock.json
+.npm
+*.egg-info
+
+# Python
+__pycache__
+.pytest_cache
+*.pyc
+.mypy_cache
+
+# Dist and build directories
+dist
+build
+
+*.DS_Store
+
+# Project specific
+/db
+/root

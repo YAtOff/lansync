@@ -1,0 +1,21 @@
+{
+  "name": "lansync",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.py",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "pytest tests",
+    "lint": "flake8",
+    "mypy": "mypy -p lansync",
+    "check": "npm run lint && npm run mypy && npm run test",
+    "pip": "pip install -r requirements/base.txt && pip install -r requirements/dev.txt",
+    "format": "black s3rsync/**/*.py; black tests/**/*.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {}
+}
