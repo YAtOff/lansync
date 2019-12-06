@@ -1,10 +1,10 @@
 -e .
 Click==7.0
 Flask==1.1.1
-Flask-Cors==3.0.8
 requests==2.22.0
 peewee==3.11.2
 dynaconf==2.2.0
 cached-property==1.5.1
 pytz==2019.3
 pydantic==1.2
+marshmallow==3.3.0

@@ -2,13 +2,11 @@ import logging
 import threading
 
 from flask import Flask
-from flask_cors import CORS  # type: ignore
 
 from werkzeug.serving import make_server, run_simple
 
 
 app = Flask(__name__)
-CORS(app)
 
 
 @app.route("/")
