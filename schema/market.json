@@ -1,0 +1,40 @@
+{
+    "type": "record",
+    "name": "Swarm",
+    "namespace": "net.vectorworks.vcs",
+    "fields": [
+        {
+            "name": "namespace",
+            "type": "string"
+        },
+        {
+            "name": "key",
+            "type": "string"
+        },
+        {
+            "name": "peers",
+            "type": {
+                "type": "array",
+                "items": {
+                    "type": "record",
+                    "name": "Peer",
+                    "namespace": "net.vectorworks.vcs",
+                    "fields": [
+                        {
+                            "name": "device_id",
+                            "type": "string"
+                        },
+                        {
+                            "name": "chunks_count",
+                            "type": "int"
+                        },
+                        {
+                            "name": "chunks",
+                            "type": "bytes"
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

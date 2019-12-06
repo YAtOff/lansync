@@ -1,0 +1,79 @@
+import os
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import RLock
+from typing import Dict, List, Optional, Iterable
+
+import requests
+from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter  # type: ignore
+
+from lansync.discovery import Peer
+from lansync.market import Market
+from lansync.util.task import async_task
+
+cert_file = os.fspath(Path.cwd() / "certs" / "alpha.crt")
+executor = ThreadPoolExecutor(max_workers=32)
+
+
+def create_session():
+    session = requests.Session()
+    session.mount("https://", HostHeaderSSLAdapter())
+    session.headers.update({"Host": "alpha"})
+    session.verify = cert_file
+    return session
+
+
+class Client:
+    def __init__(self, peer: Peer):
+        self.peer = peer
+        self.session = create_session()
+
+    @async_task(executor)
+    def download_chunk(self, namespace: str, hash: str) -> bytes:
+        url = f"https://{self.peer.address}:{self.peer.port}/chunk/{namespace}/{hash}"
+        response = self.session.get(url)
+        response.raise_for_status()
+        return response.content
+
+    @async_task(executor)
+    def exchange_market(self, market: Market) -> Optional[Market]:
+        url = f"https://{self.peer.address}:{self.peer.port}/market/{market.namespace}/{market.key}"
+        response = self.session.post(url, data=market.dump())
+        if response.status_code == 200:
+            return Market.load(response.content)
+        return None
+
+
+class ClientPool:
+    clients: Dict[str, List[Client]]
+
+    def __init__(self, clients_per_peer: int):
+        self.clients_per_peer = clients_per_peer
+        self.clients = {}
+        self.lock = RLock()
+
+    def aquire(self, peer: Peer) -> Optional[Client]:
+        with self.lock:
+            if peer.device_id not in self.clients:
+                self.clients[peer.device_id] = [
+                    Client(peer) for _ in range(self.clients_per_peer)
+                ]
+            try:
+                return self.clients[peer.device_id].pop()
+            except IndexError:
+                return None
+
+    def try_aquire_peer(self, peers: Iterable[Peer]) -> Optional[Client]:
+        for peer in peers:
+            client = self.aquire(peer)
+            if client is not None:
+                return client
+        return None
+
+    def release(self, client: Client):
+        with self.lock:
+            self.clients[client.peer.device_id].append(client)
+
+    def remove(self, peer: Peer):
+        with self.lock:
+            self.clients.pop(peer.device_id, None)

@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from faker import Faker, providers
-from playhouse.sqlite_udf import hostname
 
 from lansync.discovery import DiscoveryMessage, PeerRegistry, Peer
 
@@ -27,7 +26,7 @@ def test_discovery_message_handling():
         ip, DiscoveryMessage(device_id=device_id, namespace=namespace, port=port)
     )
 
-    assert (ip, port) in registry.peers[namespace]
+    assert device_id in registry.peers[namespace]
 
 
 def test_peer_choose():
@@ -38,9 +37,9 @@ def test_peer_choose():
     )
 
     peer = registry.choose(namespace)
-    assert peer.key == (ip, port)
+    assert peer.device_id == device_id
 
-    registry.peers[namespace][(ip, port)].timestamp = datetime.min
+    registry.peers[namespace][device_id].timestamp = datetime.min
     assert registry.choose(namespace) is None
 
 

@@ -34,6 +34,9 @@ def handle_node(
         else:
             return conflict(remote, local, stored)
     elif remote and local and stored:
+        if not stored.ready:
+            return download(remote, stored)
+
         local_updated = local.updated(stored)
         remote_updated = remote.updated(stored)
         if local_updated and remote_updated:
@@ -42,9 +45,15 @@ def handle_node(
             else:
                 return conflict(remote, local, stored)
         elif local_updated:
-            return upload(local, stored)
+            if local.checksum == stored.checksum:
+                return save_stored(remote, local)
+            else:
+                return upload(local, stored)
         elif remote_updated:
-            return download(remote, stored)
+            if remote.checksum == stored.checksum:
+                return save_stored(remote, local)
+            else:
+                return download(remote, stored)
         else:
             return nop()
     return nop()

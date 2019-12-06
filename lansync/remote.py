@@ -1,11 +1,13 @@
 from dataclasses import asdict
+import json
 from urllib.parse import urlparse, urlencode, urlunparse
 from typing import Any, List, Optional
 
 import requests
+import sseclient  # type: ignore
 
 from lansync.session import Session
-from lansync.node import NodeEvent, NodeOperation
+from lansync.common import NodeEvent, NodeOperation
 from lansync.models import RemoteNode, Namespace
 from lansync.serializers import NodeEventSerializer
 
@@ -21,9 +23,7 @@ class RemoteUrl:
         return urlunparse(url_parts)
 
     def events(self, **qs) -> str:
-        return self.build_url(
-            f"/namespace/{self.session.namespace}/events", **qs
-        )
+        return self.build_url(f"/namespace/{self.session.namespace}/events", **qs)
 
 
 class RemoteClient:
@@ -45,6 +45,14 @@ class RemoteClient:
         response = requests.post(self.remote_url.events(), json=data)
         response.raise_for_status()
 
+    def track_events(self):
+        response = requests.get(f"/namespace/{self.session.namespace}/feed", stream=True)
+        client = sseclient.SSEClient(response)
+        for event in client.events():
+            data = NodeEventSerializer().load(json.loads(event.data), many=True)
+            events = [NodeEvent(**d) for d in data]
+            print(events)
+
 
 class RemoteEventHandler:
     def __init__(self, session: Session):
@@ -59,8 +67,7 @@ class RemoteEventHandler:
     def on_create(self, event: NodeEvent):
         namespace = Namespace.by_name(self.session.namespace)  # type: ignore
         node = RemoteNode.get_or_none(
-            RemoteNode.namespace == namespace,
-            RemoteNode.key == event.key
+            RemoteNode.namespace == namespace, RemoteNode.key == event.key
         )
         attrs = asdict(event)
         if node:
@@ -74,10 +81,7 @@ class RemoteEventHandler:
         namespace = Namespace.by_name(self.session.namespace)  # type: ignore
         (
             RemoteNode.delete()
-            .where(
-                RemoteNode.namespace == namespace,
-                RemoteNode.key == event.key
-            )
+            .where(RemoteNode.namespace == namespace, RemoteNode.key == event.key)
             .execute()
         )
 

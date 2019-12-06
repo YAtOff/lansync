@@ -3,7 +3,7 @@ from uuid import uuid4
 import peewee  # tpye: ignore
 
 from lansync.database import database
-from lansync.node import NodeOperation
+from lansync.common import NodeOperation
 from lansync.util.misc import all_subclasses
 from lansync.util.db_fields import JSONField
 
@@ -25,7 +25,8 @@ class NodeEvent(peewee.Model):
     path = peewee.CharField()
     timestamp = peewee.CharField()
     checksum = peewee.CharField(null=True)
-    parts = JSONField(null=True)
+    size = peewee.IntegerField(null=True)
+    chunks = JSONField(null=True)
 
     class Meta:
         database = database

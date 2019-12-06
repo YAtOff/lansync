@@ -8,7 +8,7 @@ from playhouse.sqlite_udf import hostname
 
 from lansync.database import open_database
 from lansync.models import RemoteNode, Namespace, all_models
-from lansync.node import NodeEvent, NodeOperation
+from lansync.common import NodeEvent, NodeOperation, NodeChunk
 from lansync.remote import RemoteEventHandler, RemoteUrl
 
 fake = Faker()
@@ -19,18 +19,25 @@ fake.add_provider(providers.date_time)
 
 
 def create_event(**overrides):
-    operation = random.choice((NodeOperation.CREATE, NodeOperation.DELETE))
+    operation = overrides.pop(
+        "operation",
+        random.choice((NodeOperation.CREATE, NodeOperation.DELETE))
+    )
     event = {
         "key": fake.md5(),
-        "operation": overrides.pop("operation", operation),
-        "sequence_number": random.randint(1, 1000),
+        "operation": operation,
+        "sequence_number": fake.pyint(1, 1000),
         "path": fake.file_path(),
         "timestamp": fake.date_time().isoformat(),
     }
     if operation == NodeOperation.CREATE:
         event.update({
             "checksum": fake.md5(),
-            "parts": [fake.md5() for _ in range(random.randint(0, 10))]
+            "size": fake.pyint(1, 1024),
+            "chunks": [
+                NodeChunk(fake.md5(), fake.pyint(1, 128), fake.pyint(0, 1023))
+                for _ in range(random.randint(0, 10))
+            ]
         })
     event.update(overrides)
 

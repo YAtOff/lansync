@@ -26,7 +26,7 @@ class SyncWorker:
         self.session = session
 
         self.sync_timeout = Timeout(
-            partial(self.schedule_event, SyncWorkerEvent.SCHEDULED_SYNC), interval=10
+            partial(self.schedule_event, SyncWorkerEvent.SCHEDULED_SYNC), interval=3
         )
 
         self.sync_action_producer = SyncActionProducer(session)
@@ -104,9 +104,7 @@ class SyncActionProducer:
 def fetch_stored_nodes(session: Session) -> List[StoredNode]:
     namespace = Namespace.by_name(session.namespace)  # type: ignore
     return list(
-        StoredNode.select().where(
-            StoredNode.namespace == namespace
-        )
+        StoredNode.select().where(StoredNode.namespace == namespace)
     )
 
 
@@ -115,9 +113,7 @@ def handle_remote_events(session: Session) -> List[RemoteNode]:
 
     namespace = Namespace.by_name(session.namespace)  # type: ignore
     return list(
-        RemoteNode.select().where(
-            RemoteNode.namespace == namespace
-        )
+        RemoteNode.select().where(RemoteNode.namespace == namespace)
     )
 
 

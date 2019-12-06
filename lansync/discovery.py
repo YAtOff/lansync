@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from random import randint
-from typing import Dict, Set, Optional, Tuple, Sequence
+from typing import Dict, Set, Optional, Sequence, List
 
 from dynaconf import settings  # type: ignore
 from pydantic import BaseModel
@@ -20,21 +21,15 @@ class DiscoveryMessage(BaseModel):
     port: int
 
 
-PeerKey = Tuple[str, int]
-
-
 @dataclass
 class Peer:
     address: str
     port: int
+    device_id: str
     timestamp: datetime = field(init=False)
 
     def __post_init__(self):
         self.timestamp = datetime.now()
-
-    @property
-    def key(self) -> PeerKey:
-        return self.address, self.port
 
     def touch(self):
         self.timestamp = datetime.now()
@@ -42,45 +37,51 @@ class Peer:
 
 class PeerRegistry:
     def __init__(self):
-        self.peers: Dict[str, Dict[PeerKey, Peer]] = {}
+        self.peers: Dict[str, Dict[str, Peer]] = {}
         self.lock = threading.RLock()
 
     def handle_discovery_message(self, address: str, msg: DiscoveryMessage) -> None:
         with self.lock:
             self.peers.setdefault(msg.namespace, {})
-            key = (address, msg.port)
-            peer = self.peers[msg.namespace].get(key, None)
+            peer = self.peers[msg.namespace].get(msg.device_id, None)
             if peer is None:
-                peer = Peer(address, msg.port)
-                self.peers[msg.namespace][key] = peer
+                peer = Peer(address, msg.port, msg.device_id)
+                self.peers[msg.namespace][msg.device_id] = peer
                 logging.info("[DISCOVERY] new peer joined: %r", peer)
             else:
                 peer.touch()
 
+    def peers_for_namespace(self, namespace: str) -> List[Peer]:
+        return list(self.peers.get(namespace, {}).values())
+
     def choose(self, namespace: str) -> Optional[Peer]:
         with self.lock:
             live_peers = self.live_peers(namespace)
-            return live_peers[randint(0, len(live_peers) - 1)] if live_peers \
-                else None
+            return live_peers[randint(0, len(live_peers) - 1)] if live_peers else None
 
     def live_peers(self, namespace: str) -> Sequence[Peer]:
         now = datetime.now()
         return [
-            p for p in self.peers.get(namespace, {}).values()
+            p
+            for p in self.peers.get(namespace, {}).values()
             if now - p.timestamp < timedelta(minutes=5)
         ]
 
     def iter_peers(self, namespace: str):
-        checked_peers: Set[PeerKey] = set()
+        checked_peers: Set[str] = set()
         while True:
             live_peers = self.live_peers(namespace)
-            peers = [p for p in live_peers if p.key not in checked_peers]
+            peers = [p for p in live_peers if p.device_id not in checked_peers]
             if not peers:
                 return
 
             peer = peers[randint(0, len(peers) - 1)]
             yield peer
-            checked_peers.add(peer.key)
+            checked_peers.add(peer.device_id)
+
+    @property
+    def empty(self) -> bool:
+        return len(self.peers) == 0
 
 
 class Receiver:
@@ -90,7 +91,8 @@ class Receiver:
 
     def run(self):
         client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        if sys.platform == "linux":
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         client.bind(("", settings.DISCOVERY_PORT))
@@ -114,13 +116,14 @@ class Sender:
 
     def run(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        if sys.platform == "linux":
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         # Set a timeout so the socket does not block indefinitely when trying to receive data.
         server.settimeout(0.2)
         while True:
-            server.sendto(self.msg, ('<broadcast>', settings.DISCOVERY_PORT))
+            server.sendto(self.msg, ("<broadcast>", settings.DISCOVERY_PORT))
             logging.debug("[DISCOVERY] -> %s", self.msg)
             time.sleep(settings.DISCOVERY_PING_INTERVAL)
 
@@ -132,6 +135,4 @@ class Sender:
 
 def run_discovery_loop(device_id: str, namespace: str, port: int, peer_registry: PeerRegistry):
     Receiver.run_in_thread(device_id, peer_registry)
-    Sender.run_in_thread(
-        DiscoveryMessage(device_id=device_id, namespace=namespace, port=port)
-    )
+    Sender.run_in_thread(DiscoveryMessage(device_id=device_id, namespace=namespace, port=port))

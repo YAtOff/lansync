@@ -7,7 +7,7 @@ from lansync.database import open_database
 from lansync.discovery import run_discovery_loop
 from lansync.models import Device, all_models
 from lansync.server import run_in_thread as run_server
-from lansync.session import Session
+from lansync.session import Session, instance as session_instance
 from lansync.sync import SyncWorker
 
 logging.basicConfig(level=logging.INFO)
@@ -19,8 +19,9 @@ logging.basicConfig(level=logging.INFO)
 @click.option("--once/--no-once", default=False)
 def main(namespace: str, root_folder: str, once: bool):
     with open_database(settings.LOCAL_DB, models=all_models):
-        session = Session.create(namespace, root_folder)
         device_id = Device.default_device_id()
+        session = Session.create(namespace, root_folder, device_id)
+        session_instance.configure(session)
 
         def on_server_start(server_port):
             run_discovery_loop(device_id, namespace, server_port, session.peer_registry)

@@ -1,40 +1,17 @@
 from __future__ import annotations
 
-import enum
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
 from lansync.session import Session
-from lansync.models import StoredNode
-from lansync.util.file import hash_path, file_checksum, file_chunks_checksums
-
-
-class NodeOperation(str, enum.Enum):
-    CREATE = "create"
-    DELETE = "delete"
-
-    @classmethod
-    def choices(cls):
-        return [
-            (cls.CREATE, "Create"),
-            (cls.DELETE, "Delete"),
-        ]
-
-    def __str__(self):
-        return self.value
-
-
-@dataclass
-class NodeEvent:
-    key: str
-    operation: NodeOperation
-    path: str
-    timestamp: str
-    checksum: Optional[str] = None
-    parts: Optional[List[str]] = None
-    sequence_number: Optional[int] = None
+from lansync.models import StoredNode, Namespace, RootFolder, NodeChunk as NodeChunkModel
+from lansync.common import NodeChunk
+from lansync.util.file import (
+    hash_path, file_checksum, read_file_chunks,
+    read_chunk, write_chunk, create_file_placeholder
+)
 
 
 @dataclass
@@ -60,8 +37,14 @@ class LocalNode:
             modified_time=int(stat.st_mtime),
             created_time=int(stat.st_ctime),
             size=stat.st_size,
-            _checksum=None
+            _checksum=None,
         )
+
+    @classmethod
+    def create_placeholder(cls, local_path: Path, size: int, session: Session) -> LocalNode:
+        if not local_path.exists():
+            create_file_placeholder(local_path, size)
+        return cls.create(local_path, session)
 
     def updated(self, stored: StoredNode) -> bool:
         return (
@@ -84,5 +67,49 @@ class LocalNode:
         return self._checksum
 
     @property
-    def parts(self) -> List[str]:
-        return file_chunks_checksums(self.local_fspath)
+    def chunks(self) -> List[NodeChunk]:
+        return [NodeChunk(*c) for c in read_file_chunks(self.local_fspath)]
+
+    def read_chunk(self, chunk: NodeChunk) -> bytes:
+        return read_chunk(self.local_path, chunk.offset, chunk.size)
+
+    def write_chunk(self, chunk: NodeChunk, data: bytes) -> None:
+        write_chunk(self.local_path, data, chunk.offset)
+
+    def transfer_chunk(self, src: Path, chunk: NodeChunk):
+        data = read_chunk(src, chunk.offset, chunk.size)
+        self.write_chunk(chunk, data)
+
+    def store(self, session: Session, stored_node: Optional[StoredNode]) -> StoredNode:
+        """
+        # TODO: maybe use:
+            (StoredNode
+                .insert(**kwargs)
+                .on_conflict("replace")
+                .execute()
+            )
+        """
+        if stored_node is not None:
+            stored_node.checksum = self.checksum
+            stored_node.size = self.size
+            stored_node.local_modified_time = self.modified_time
+            stored_node.local_created_time = self.created_time
+            stored_node.ready = True
+            stored_node.save()
+        else:
+            stored_node = StoredNode.create(
+                namespace=Namespace.for_session(session),
+                root_folder=RootFolder.for_session(session),
+                key=self.key,
+                path=self.path,
+                checksum=self.checksum,
+                size=self.size,
+                local_modified_time=self.modified_time,
+                local_created_time=self.created_time,
+                ready=True
+            )
+
+        for chunk in self.chunks:
+            NodeChunkModel.update_or_create(stored_node, chunk)
+
+        return stored_node

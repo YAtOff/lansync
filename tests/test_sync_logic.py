@@ -8,6 +8,7 @@ from faker import Faker, providers
 
 from lansync.models import StoredNode, RemoteNode, Namespace
 from lansync.node import LocalNode
+from lansync.common import NodeChunk
 from lansync.sync_action import (
     SyncAction,
     download,
@@ -38,7 +39,10 @@ generate = Bunch(
     path=lambda: fake.file_path().strip("/"),
     key=lambda: "".join([random.choice("abcdef0123456789") for i in range(32)]),
     checksum=lambda: fake.md5(),
-    parts=lambda: [fake.md5() for _ in range(random.randint(0, 10))],
+    chunks=lambda: [
+        NodeChunk(fake.md5(), fake.pyint(1, 128), fake.pyint(0, 1023))
+        for _ in range(random.randint(0, 10))
+    ],
     datetime=lambda: fake.date_time(),
     timestamp=lambda: random.randint(1, 1000000000),
     iso_timestamp=lambda: fake.date_time().isoformat(),
@@ -80,8 +84,9 @@ class FileGenerator:
             "namespace": self.namespace,
             "key": self.key,
             "checksum": self.checksum,
-            "parts": generate.parts(),
+            "chunks": generate.chunks(),
             "timestamp": generate.iso_timestamp(),
+            "size": self.size,
             **extra_attrs,
         }
         return RemoteNode(**attrs)
@@ -104,9 +109,10 @@ class FileGenerator:
             "key": self.key,
             "namespace": self.namespace,
             "checksum": self.checksum,
-            "parts": generate.parts(),
             "local_modified_time": self.modified_time,
             "local_created_time": self.created_time,
+            "size": self.size,
+            "ready": True,
             **extra_attrs,
         }
         return StoredNode(**attrs)
@@ -169,7 +175,10 @@ file = FileGenerator()
             lambda r, l, s: nop()
         ),
         (
-            10, file.new().remote(), file.local(modified_time=modified_time.new()), file.stored(),
+            10,
+            file.new().remote(),
+            file.local(modified_time=modified_time.new(), _checksum=checksum.new()),
+            file.stored(),
             lambda r, l, s: upload(l, s)
         ),
         (
@@ -189,6 +198,10 @@ file = FileGenerator()
             file.local(modified_time=modified_time.new(), _checksum=checksum.new()),
             file.stored(),
             lambda r, l, s: conflict(r, l, s)
+        ),
+        (
+            14, file.new().remote(), file.local(), file.stored(ready=False),
+            lambda r, l, s: download(r, s)
         ),
     ]
 )

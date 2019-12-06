@@ -1,15 +1,18 @@
+from io import BytesIO
 import logging
 import os
 from pathlib import Path
 import threading
 from typing import Callable, Dict, Any
 
-import peewee  # type: ignore
-from flask import Flask, send_from_directory, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 from werkzeug.serving import make_server, run_simple
 
-from lansync.models import Namespace, StoredNode
+from lansync.models import NodeChunk
+from lansync.market import Market
+from lansync.node import LocalNode
+from lansync.session import instance as session
 
 
 certs_dir = Path.cwd() / "certs"
@@ -18,22 +21,38 @@ certs_dir = Path.cwd() / "certs"
 app = Flask(__name__)
 
 
-@app.route("/content/<namespace_name>/<key>", methods=["GET", "HEAD"])
-def content(namespace_name, key):
-    try:
-        namespace = Namespace.get(Namespace.name == namespace_name)
-        node = StoredNode.get(
-            StoredNode.namespace == namespace,
-            StoredNode.key == key
-        )
-    except peewee.DoesNotExist:
+@app.route("/market/<namespace_name>/<key>", methods=["POST"])
+def exchange(namespace_name, key):
+    other_market = Market.load_from_file(request.stream)
+
+    market = session.market_repo.load(namespace_name, key)
+    if market is not None:
+        market.merge(other_market)
+        market = session.market_repo.save(market)
+    else:
+        market = session.market_repo.save(other_market)
+
+    fd = BytesIO()
+    market.dump_to_file(fd)
+    fd.seek(os.SEEK_SET)
+    return send_file(fd, mimetype="application/octet-stream")
+
+
+@app.route("/chunk/<namespace_name>/<content_hash>", methods=["GET", "HEAD"])
+def chunk(namespace_name, content_hash):
+    node_chunk_pair = NodeChunk.find(namespace_name, content_hash)
+    if node_chunk_pair is None:
         return jsonify({"ok": False, "error": "Not found"}), 404
+
+    node, chunk = node_chunk_pair
 
     if request.method == "HEAD":
         return "", 200
 
-    path = node.local_path
-    return send_from_directory(os.fspath(path.parent), path.name)
+    local_node = LocalNode.create(node.local_path, session)
+    print("Reading chunk", chunk, "from", node.local_path)
+    fd = BytesIO(local_node.read_chunk(chunk))
+    return send_file(fd, mimetype="application/octet-stream")
 
 
 def run(app, debug=False, on_start: Callable[[int], None] = None):
@@ -41,11 +60,7 @@ def run(app, debug=False, on_start: Callable[[int], None] = None):
     options.setdefault("threaded", True)
     options.setdefault("threaded", True)
     options.setdefault(
-        "ssl_context",
-        (
-            os.fspath(certs_dir / "alpha.crt"),
-            os.fspath(certs_dir / "alpha.key"),
-        )
+        "ssl_context", (os.fspath(certs_dir / "alpha.crt"), os.fspath(certs_dir / "alpha.key"),)
     )
 
     host = "0.0.0.0"

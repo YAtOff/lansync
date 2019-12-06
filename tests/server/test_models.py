@@ -6,7 +6,7 @@ from faker import Faker, providers
 
 from lansync_server.models import Sequence, all_models
 from lansync_server.service import load_events, store_events
-from lansync.node import NodeOperation
+from lansync.common import NodeOperation, NodeChunk
 from lansync.database import open_database
 
 
@@ -28,7 +28,11 @@ def create_event(**overrides):
     if operation == NodeOperation.CREATE:
         events.update({
             "checksum": fake.md5(),
-            "parts": [fake.md5() for _ in range(random.randint(0, 10))]
+            "size": fake.pyint(1, 1024),
+            "chunks": [
+                {"hash": fake.md5(), "size": fake.pyint(1, 128), "offset": fake.pyint(0, 1023)}
+                for _ in range(random.randint(0, 10))
+            ]
         })
 
     return {**events, **overrides}

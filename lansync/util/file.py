@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from contextlib import contextmanager
 import hashlib
 import logging
@@ -5,7 +7,7 @@ import os
 import os.path
 from pathlib import Path
 import tempfile
-from typing import Generator, Optional, Dict, List
+from typing import Generator, Optional, Dict, List, Union, Tuple
 
 
 def iter_folder(folder: Path) -> Generator[Path, None, None]:
@@ -31,6 +33,26 @@ def create_temp_file():
         pass
 
 
+def create_file_placeholder(path: Path, size: int) -> None:
+    if not path.parent.exists():
+        path.parent.mkdir(parents=True)
+    with open(path, "wb") as f:
+        f.seek(size - 1)
+        f.write(b"\0")
+
+
+def read_chunk(path: Path, offset: int, size: int) -> bytes:
+    with open(path, "rb") as file:
+        file.seek(offset, os.SEEK_SET)
+        return file.read(size)
+
+
+def write_chunk(path: Path, data: bytes, offset: int) -> None:
+    with open(path, "r+b") as file:
+        file.seek(offset, os.SEEK_SET)
+        file.write(data)
+
+
 def file_checksum(file_name: str, hash_func: str = "md5") -> Optional[str]:
     try:
         hash = hashlib.new(hash_func)
@@ -45,24 +67,33 @@ def file_checksum(file_name: str, hash_func: str = "md5") -> Optional[str]:
         return None
 
 
-def file_chunks_checksums(
-    file_name: str,
-    hash_func: str = "md5",
-    chunk_size: int = 1024 * 1024
-) -> List[str]:
-    hashes = []
+def buffer_checksum(buffer: bytes, hash_func: str = "md5") -> str:
+    hash = hashlib.new(hash_func)
+    hash.update(buffer)
+    return hash.hexdigest()
+
+
+def read_file_chunks(
+    path: Union[Path, str], hash_func: str = "md5", chunk_size: int = 1024 * 1024
+) -> List[Tuple[str, int, int]]:
+    chunks: List[Tuple[str, int, int]] = []
     try:
-        with open(file_name, "rb") as f:
+        with open(path, "rb") as f:
+            offset = 0
             while True:
                 hash = hashlib.new(hash_func)
                 data = f.read(chunk_size)
+                size = len(data)
+                if size == 0:
+                    break
                 hash.update(data)
-                hashes.append(hash.hexdigest())
-                if len(data) < chunk_size:
+                chunks.append((hash.hexdigest(), size, offset))
+                offset += size
+                if size < chunk_size:
                     break
     except IOError:
         logging.error(u"[FILE] Error calculating checksum", exc_info=True)
-    return hashes
+    return chunks
 
 
 def get_stats(path: str) -> Dict:
