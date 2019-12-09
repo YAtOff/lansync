@@ -1,7 +1,7 @@
 from typing import List, Dict
 
 from lansync_server.models import Namespace, NodeEvent, Sequence
-from lansync_server.serializers import NodeEventSerializer
+from lansync.serializers import NodeEventSerializer
 
 
 def store_events(namespace_name: str, data) -> int:
@@ -10,11 +10,8 @@ def store_events(namespace_name: str, data) -> int:
     sequence_number = 0
     for event in events:
         sequence_number = Sequence.increment(namespace_name)
-        NodeEvent.create(
-            namespace=namespace,
-            sequence_number=sequence_number,
-            **event
-        )
+        event["sequence_number"] = sequence_number
+        NodeEvent.create(namespace=namespace, **event)
     return sequence_number
 
 

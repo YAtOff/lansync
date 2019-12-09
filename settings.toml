@@ -3,15 +3,21 @@ ENVIRONMENT = "dev"
 DISCOVERY_PORT = 12345
 DISCOVERY_PING_INTERVAL = 10
 SERVER_DB = "db/server.db"
+LOCAL_DB = "db/client.db"
+REMOTE_SERVER_URL = "http://localhost:5555"
 
 [development]
 ENVIRONMENT = "dev"
 DISCOVERY_PORT = 12345
 DISCOVERY_PING_INTERVAL = 10
 SERVER_DB = "db/server.db"
+LOCAL_DB = "db/client.db"
+REMOTE_SERVER_URL = "http://localhost:5555"
 
 [testing]
 ENVIRONMENT = "testing"
 DISCOVERY_PORT = 12345
 DISCOVERY_PING_INTERVAL = 10
 SERVER_DB = ":memory:"
+LOCAL_DB = "db/client.db"
+REMOTE_SERVER_URL = "http://localhost:5555"

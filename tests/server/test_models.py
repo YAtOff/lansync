@@ -4,8 +4,9 @@ import pytest
 
 from faker import Faker, providers
 
-from lansync_server.models import Sequence, NodeOperation, all_models
+from lansync_server.models import Sequence, all_models
 from lansync_server.service import load_events, store_events
+from lansync.node import NodeOperation
 from lansync.database import open_database
 
 

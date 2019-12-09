@@ -1,35 +1,11 @@
-import enum
-import json
 from uuid import uuid4
 
 import peewee  # tpye: ignore
 
 from lansync.database import database
+from lansync.node import NodeOperation
 from lansync.util.misc import all_subclasses
-
-
-class NodeOperation(str, enum.Enum):
-    CREATE = "create"
-    DELETE = "delete"
-
-    @classmethod
-    def choices(cls):
-        return [
-            (cls.CREATE, "Create"),
-            (cls.DELETE, "Delete"),
-        ]
-
-    def __str__(self):
-        return self.value
-
-
-class JSONField(peewee.TextField):
-    def db_value(self, value):
-        return json.dumps(value)
-
-    def python_value(self, value):
-        if value is not None:
-            return json.loads(value)
+from lansync.util.db_fields import JSONField
 
 
 class Namespace(peewee.Model):
@@ -53,6 +29,10 @@ class NodeEvent(peewee.Model):
 
     class Meta:
         database = database
+
+    @property
+    def namespace_name(self) -> str:
+        return self.namespace.name
 
 
 class Sequence(peewee.Model):
