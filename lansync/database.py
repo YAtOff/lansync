@@ -9,7 +9,7 @@ database = peewee.DatabaseProxy()
 
 @contextmanager
 def open_database(path, models=None):
-    database_exists = Path(path).exists()
+    database_exists = path != ":memory:" and Path(path).exists()
     database.initialize(peewee.SqliteDatabase(path, pragmas={"foreign_keys": 1}))
     try:
         database.connect()

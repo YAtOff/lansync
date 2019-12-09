@@ -1,77 +1,32 @@
+from dynaconf import settings  # type: ignore
 from flask import Flask, jsonify, request
 
-from dynaconf import settings  # type: ignore
-import peewee  # tpye: ignore
-
-from lansync_server.models import Namespace, Node, all_models
-from lansync_server.serializers import NodeSerializer
 from lansync.database import open_database
+from lansync_server.models import all_models
+from lansync_server.service import load_events, store_events
+from lansync_server.util import error_response
 
 
 app = Flask(__name__)
 
 
-def response_404():
-    return jsonify({"ok": False, "error": "Not found"}), 404
+@app.route("/namespace/<namespace>/events",  methods=["GET", "POST"])
+def node(namespace):
 
-
-def response_406():
-    return jsonify({"ok": False, "error": "Not acceptable"}), 406
-
-
-@app.route("/namespace/<name>",  methods=["GET", "PUT"])
-def namespace(name):
-    if request.method == "PUT":
-        namespace, created = Namespace.get_or_create(name=name)
-    else:
-        try:
-            created = False
-            namespace = Namespace.get(Namespace.name == name)
-        except peewee.DoesNotExist:
-            return response_404()
-
-    nodes = Node.select().where(Node.namespace == namespace) if not created \
-        else []
-    serializer = NodeSerializer()
-    data = [serializer.dump(node) for node in nodes]
-    return jsonify(data)
-
-
-@app.route("/namespace/<namespace_name>/node/<key>",  methods=["GET", "PUT"])
-def node(namespace_name, key):
-    try:
-        namespace = Namespace.get(Namespace.name == namespace_name)
-    except peewee.DoesNotExist:
-        return response_404()
-
-    serializer = NodeSerializer()
-    if request.method == "PUT":
+    if request.method == "POST":
         if not request.is_json:
-            return response_406()
+            return error_response(406)
 
-        data = serializer.load(request.get_json())
-        node, created = Node.get_or_create(
-            namespace=namespace, key=key, defaults=data
-        )
-        if not created:
-            for k, v in data.items():
-                setattr(node, k, v)
-            node.save()
+        events = []
+        last_sequence_number = store_events(namespace, request.get_json())
     else:
-        try:
-            node = (
-                Node.select()
-                .where(
-                    Node.namespace == namespace,
-                    Node.key == key
-                )
-                .get()
-            )
-        except peewee.DoesNotExist:
-            return response_404()
+        events = load_events(namespace, int(request.args.get("min_sequence_number", 0)))
+        last_sequence_number = events[-1]["sequence_number"] if events else 0
 
-    result = serializer.dump(node)
-    return jsonify(result)
+    return jsonify({
+        "last_sequence_number": last_sequence_number,
+        "events": events
+    })
 
 
 if __name__ == "__main__":
