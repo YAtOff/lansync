@@ -1,31 +1,45 @@
 import logging
+import os
 import threading
+from typing import Callable, Dict, Any
 
-from flask import Flask
+import peewee  # type: ignore
+from flask import Flask, send_from_directory, jsonify, request
 
 from werkzeug.serving import make_server, run_simple
+
+from lansync.models import Namespace, StoredNode
 
 
 app = Flask(__name__)
 
 
-@app.route("/")
-def index():
-    return "Hello!"
+@app.route("/content/<namespace_name>/<key>", methods=["GET", "HEAD"])
+def content(namespace_name, key):
+    try:
+        namespace = Namespace.get(Namespace.name == namespace_name)
+        node = StoredNode.get(
+            StoredNode.namespace == namespace,
+            StoredNode.key == key
+        )
+    except peewee.DoesNotExist:
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    if request.method == "HEAD":
+        return "", 200
+
+    path = node.local_path
+    return send_from_directory(os.fspath(path.parent), path.name)
 
 
-def run(app, server_name=None, debug=False):
-    options = {}
+def run(app, debug=False, on_start: Callable[[int], None] = None):
+    options: Dict[str, Any] = {}
     options.setdefault("use_reloader", debug)
     options.setdefault("use_debugger", debug)
     options.setdefault("threaded", True)
 
-    sn_host, sn_port = None, None
-    if server_name and server_name != "random":
-        sn_host, _, sn_port = server_name.partition(":")
-
-    host = sn_host or "127.0.0.1"
-    port = int(sn_port or 0)
+    host = "0.0.0.0"
+    port = 0
 
     if debug:
         run_simple(host, port, app, **options)  # ???
@@ -34,8 +48,11 @@ def run(app, server_name=None, debug=False):
         _, port = server.server_address
 
         logging.info("Serving on port: %d", port)
+        if on_start is not None:
+            on_start(port)
+
         server.serve_forever()
 
 
-def run_in_thread(server_name=None, debug=False):
-    threading.Thread(target=run, args=(app, server_name, debug), daemon=True).start()
+def run_in_thread(debug=False, on_start: Callable[[int], None] = None):
+    threading.Thread(target=run, args=(app, debug, on_start), daemon=True).start()

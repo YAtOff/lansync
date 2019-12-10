@@ -3,25 +3,31 @@ import logging
 import click
 from dynaconf import settings  # type: ignore
 
-# from lansync.discovery import loop as run_discovery_loop
-# from lansync.server import run_in_thread as start_server
 from lansync.database import open_database
-from lansync.models import all_models
+from lansync.discovery import run_discovery_loop
+from lansync.models import Device, all_models
+from lansync.server import run_in_thread as run_server
 from lansync.session import Session
 from lansync.sync import SyncWorker
-
 
 logging.basicConfig(level=logging.INFO)
 
 
 @click.command()
 @click.argument("namespace")
+@click.argument("root_folder")
 @click.option("--once/--no-once", default=False)
-def main(namespace: str, once: bool):
-    # start_server()
-    # run_discovery_loop(namespace)
+def main(namespace: str, root_folder: str, once: bool):
     with open_database(settings.LOCAL_DB, models=all_models):
-        worker = SyncWorker(Session.create(namespace))
+        session = Session.create(namespace, root_folder)
+        device_id = Device.default_device_id()
+
+        def on_server_start(server_port):
+            run_discovery_loop(device_id, namespace, server_port, session.peer_registry)
+
+        run_server(on_start=on_server_start)
+
+        worker = SyncWorker(session)
         if once:
             worker.run_once()
         else:

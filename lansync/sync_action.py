@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from functools import partial, wraps
 from typing import Callable, Optional
 
-from lansync.models import StoredNode, RemoteNode
+from lansync.models import StoredNode, RemoteNode, RootFolder, Namespace
 from lansync.node import LocalNode, NodeEvent, NodeOperation
 from lansync.remote import RemoteClient, RemoteEventHandler
 from lansync.session import Session
+from lansync.file_transfer import download_from_peer
 from lansync.util.timeutil import now_as_iso
 
 
@@ -54,7 +55,27 @@ def upload(
         checksum=local_node.checksum,
         parts=local_node.parts
     )
+
     RemoteClient(session).push_events([event])
+
+    if stored_node is not None:
+        stored_node.checksum = local_node.checksum
+        stored_node.parts = local_node.parts  # type: ignore
+        stored_node.local_modified_time = local_node.modified_time
+        stored_node.local_created_time = local_node.created_time
+        stored_node.save()
+    else:
+        StoredNode.create(
+            namespace=Namespace.for_session(session),
+            root_folder=RootFolder.for_session(session),
+            key=local_node.key,
+            path=local_node.path,
+            checksum=local_node.checksum,
+            parts=local_node.parts,
+            local_modified_time=local_node.modified_time,
+            local_created_time=local_node.created_time
+        )
+
     RemoteEventHandler(session).handle_new_events()
     return SyncActionResult()
 
@@ -64,6 +85,28 @@ def download(
     remote_node: RemoteNode, stored_node: Optional[StoredNode],
     session: Session
 ) -> SyncActionResult:
+    local_path = session.root_folder.path / remote_node.path
+    if not download_from_peer(remote_node, local_path, session):
+        return SyncActionResult()
+    local_node = LocalNode.create(local_path, session)
+    if stored_node is not None:
+        stored_node.checksum = local_node.checksum
+        stored_node.parts = local_node.parts  # type: ignore
+        stored_node.local_modified_time = local_node.modified_time
+        stored_node.local_created_time = local_node.created_time
+        stored_node.save()
+    else:
+        StoredNode.create(
+            namespace=remote_node.namespace,
+            root_folder=RootFolder.for_session(session),
+            key=local_node.key,
+            path=local_node.path,
+            checksum=local_node.checksum,
+            parts=local_node.parts,
+            local_modified_time=local_node.modified_time,
+            local_created_time=local_node.created_time
+        )
+
     return SyncActionResult()
 
 
@@ -89,6 +132,7 @@ def delete_remote(
         timestamp=now_as_iso()
     )
     RemoteClient(session).push_events([event])
+    stored_node.delete().execute()
     RemoteEventHandler(session).handle_new_events()
     return SyncActionResult()
 
@@ -100,6 +144,7 @@ def save_stored(
 ) -> SyncActionResult:
     StoredNode.create(
         namespace=remote_node.namespace,
+        root_folder=RootFolder.for_session(session),
         key=remote_node.key,
         path=remote_node.path,
         checksum=remote_node.checksum,

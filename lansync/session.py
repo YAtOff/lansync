@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from lansync.discovery import PeerRegistry
+
 
 @dataclass
 class RootFolder:
@@ -13,8 +15,8 @@ class RootFolder:
     fspath: str
 
     @classmethod
-    def create(cls, namespace: str) -> RootFolder:
-        path = Path.cwd() / namespace
+    def create(cls, fspath: str) -> RootFolder:
+        path = Path(fspath).resolve()
         return cls(path=path, fspath=os.fspath(path))
 
 
@@ -23,13 +25,13 @@ class Session:
     namespace: str
     root_folder: RootFolder
     remote_server_url: str
+    peer_registry: PeerRegistry
 
     @classmethod
-    def create(cls, namespace: str) -> Session:
-        root_folder = RootFolder.create(namespace)
-
+    def create(cls, namespace: str, root_folder: str) -> Session:
         return cls(
             namespace=namespace,
-            root_folder=root_folder,
-            remote_server_url=settings.REMOTE_SERVER_URL
+            root_folder=RootFolder.create(root_folder),
+            remote_server_url=settings.REMOTE_SERVER_URL,
+            peer_registry=PeerRegistry()
         )
