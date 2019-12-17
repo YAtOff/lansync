@@ -1,37 +1,44 @@
+from contextlib import contextmanager
+import os
 import shutil
 from pathlib import Path
-from typing import Set, Optional
 
 import requests
+from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter  # type: ignore
 
 from lansync.models import RemoteNode
 from lansync.session import Session
-from lansync.discovery import Peer
 from lansync.util.file import create_temp_file
 
 
+cert_file = os.fspath(Path.cwd() / "certs" / "alpha.crt")
+
+
+@contextmanager
+def create_session():
+    with requests.Session() as session:
+        session.mount('https://', HostHeaderSSLAdapter())
+        session.headers.update({"Host": "alpha"})
+        session.verify = cert_file
+        yield session
+
+
 def download_from_peer(remote_node: RemoteNode, dest: Path, session: Session) -> bool:
-    dummy_peer = Peer(address="", port=0)
-    checked_peers: Set[Peer] = set((dummy_peer,))
-    peer: Optional[Peer] = dummy_peer
-    while peer in checked_peers:
-        peer = session.peer_registry.choose(session.namespace)
-        if peer is not None:
-            url = f"http://{peer.address}:{peer.port}/content/{session.namespace}/{remote_node.key}"
-            response = requests.head(url)
+    for peer in session.peer_registry.iter_peers(session.namespace):
+        url = f"https://{peer.address}:{peer.port}/content/{session.namespace}/{remote_node.key}"
+        with create_session() as s:
+            response = s.head(url)
             if response.status_code == 200:
-                download_file(url, dest)
+                download_file(s, url, dest)
                 return True
-        else:
-            return False
 
     return False
 
 
-def download_file(url: str, dest: Path):
+def download_file(session, url: str, dest: Path):
     with create_temp_file() as file_path:
         with open(file_path, "wb") as file:
-            response = requests.get(url, stream=True)
+            response = session.get(url, stream=True)
             response.raise_for_status()
             content_length = response.headers.get("content-length")
 

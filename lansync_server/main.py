@@ -12,7 +12,6 @@ app = Flask(__name__)
 
 @app.route("/namespace/<namespace>/events",  methods=["GET", "POST"])
 def node(namespace):
-
     if request.method == "POST":
         if not request.is_json:
             return error_response(406)

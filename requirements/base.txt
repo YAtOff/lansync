@@ -2,6 +2,7 @@
 Click==7.0
 Flask==1.1.1
 requests==2.22.0
+requests-toolbelt==0.9.1
 peewee==3.11.2
 dynaconf==2.2.0
 cached-property==1.5.1

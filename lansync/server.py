@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 import threading
 from typing import Callable, Dict, Any
 
@@ -9,6 +10,9 @@ from flask import Flask, send_from_directory, jsonify, request
 from werkzeug.serving import make_server, run_simple
 
 from lansync.models import Namespace, StoredNode
+
+
+certs_dir = Path.cwd() / "certs"
 
 
 app = Flask(__name__)
@@ -34,17 +38,25 @@ def content(namespace_name, key):
 
 def run(app, debug=False, on_start: Callable[[int], None] = None):
     options: Dict[str, Any] = {}
-    options.setdefault("use_reloader", debug)
-    options.setdefault("use_debugger", debug)
     options.setdefault("threaded", True)
+    options.setdefault("threaded", True)
+    options.setdefault(
+        "ssl_context",
+        (
+            os.fspath(certs_dir / "alpha.crt"),
+            os.fspath(certs_dir / "alpha.key"),
+        )
+    )
 
     host = "0.0.0.0"
     port = 0
 
     if debug:
+        options.setdefault("use_reloader", debug)
+        options.setdefault("use_debugger", debug)
         run_simple(host, port, app, **options)  # ???
     else:
-        server = make_server(host, port, app, threaded=True)
+        server = make_server(host, port, app, **options)
         _, port = server.server_address
 
         logging.info("Serving on port: %d", port)

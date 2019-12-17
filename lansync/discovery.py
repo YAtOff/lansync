@@ -5,8 +5,10 @@ import logging
 import socket
 import threading
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from random import randint
-from typing import Dict, NamedTuple, List, Optional
+from typing import Dict, Set, Optional, Tuple, Sequence
 
 from dynaconf import settings  # type: ignore
 from pydantic import BaseModel
@@ -18,30 +20,67 @@ class DiscoveryMessage(BaseModel):
     port: int
 
 
-class Peer(NamedTuple):
+PeerKey = Tuple[str, int]
+
+
+@dataclass
+class Peer:
     address: str
     port: int
+    timestamp: datetime = field(init=False)
+
+    def __post_init__(self):
+        self.timestamp = datetime.now()
+
+    @property
+    def key(self) -> PeerKey:
+        return self.address, self.port
+
+    def touch(self):
+        self.timestamp = datetime.now()
 
 
 class PeerRegistry:
     def __init__(self):
-        self.peers: Dict[str, List[Peer]] = {}
+        self.peers: Dict[str, Dict[PeerKey, Peer]] = {}
         self.lock = threading.RLock()
 
     def handle_discovery_message(self, address: str, msg: DiscoveryMessage) -> None:
         with self.lock:
-            self.peers.setdefault(msg.namespace, [])
-            peer = Peer(address=address, port=msg.port)
-            if peer not in self.peers[msg.namespace]:
-                self.peers[msg.namespace].append(peer)
+            self.peers.setdefault(msg.namespace, {})
+            key = (address, msg.port)
+            peer = self.peers[msg.namespace].get(key, None)
+            if peer is None:
+                peer = Peer(address, msg.port)
+                self.peers[msg.namespace][key] = peer
                 logging.info("[DISCOVERY] new peer joined: %r", peer)
+            else:
+                peer.touch()
 
     def choose(self, namespace: str) -> Optional[Peer]:
         with self.lock:
-            peers = self.peers.get(namespace)
+            live_peers = self.live_peers(namespace)
+            return live_peers[randint(0, len(live_peers) - 1)] if live_peers \
+                else None
+
+    def live_peers(self, namespace: str) -> Sequence[Peer]:
+        now = datetime.now()
+        return [
+            p for p in self.peers.get(namespace, {}).values()
+            if now - p.timestamp < timedelta(minutes=5)
+        ]
+
+    def iter_peers(self, namespace: str):
+        checked_peers: Set[PeerKey] = set()
+        while True:
+            live_peers = self.live_peers(namespace)
+            peers = [p for p in live_peers if p.key not in checked_peers]
             if not peers:
-                return None
-            return peers[randint(0, len(peers))]
+                return
+
+            peer = peers[randint(0, len(peers) - 1)]
+            yield peer
+            checked_peers.add(peer.key)
 
 
 class Receiver:
