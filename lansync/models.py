@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple
 
 import peewee  # type: ignore
 
-from lansync.database import database
+from lansync.database import database, atomic
 from lansync.session import Session
 from lansync import common
 from lansync.util.db_fields import JSONField
@@ -92,8 +92,7 @@ class StoredNode(peewee.Model):
             .where(NodeChunk.node == self)
         )
         return [
-            common.NodeChunk(hash=c.chunk.hash, size=c.chunk.size, offset=c.offset)
-            for c in chunks
+            common.NodeChunk(hash=c.chunk.hash, size=c.chunk.size, offset=c.offset) for c in chunks
         ]
 
     def sync_with_local(self, local_node):
@@ -113,9 +112,7 @@ class Chunk(peewee.Model):
 
     @classmethod
     def update_or_create(cls, hash: str, size: int) -> Chunk:
-        chunk, _ = cls.get_or_create(
-            hash=hash, defaults={"size": size}
-        )
+        chunk, _ = cls.get_or_create(hash=hash, defaults={"size": size})
         if chunk.size != size:
             chunk.size = size
             chunk.save()
@@ -133,14 +130,15 @@ class NodeChunk(peewee.Model):
 
     @classmethod
     def update_or_create(cls, node: StoredNode, chunk: common.NodeChunk) -> NodeChunk:
-        chunk_db_instance = Chunk.update_or_create(chunk.hash, chunk.size)
-        node_chunk, _ = cls.get_or_create(
-            node=node, chunk=chunk_db_instance, defaults={"offset": chunk.offset}
-        )
-        if node_chunk.offset != chunk.offset:
-            node_chunk.offset = chunk.offset
-            node_chunk.save()
-        return node_chunk
+        with atomic():
+            chunk_db_instance = Chunk.update_or_create(chunk.hash, chunk.size)
+            node_chunk, _ = cls.get_or_create(
+                node=node, chunk=chunk_db_instance, defaults={"offset": chunk.offset}
+            )
+            if node_chunk.offset != chunk.offset:
+                node_chunk.offset = chunk.offset
+                node_chunk.save()
+            return node_chunk
 
     @classmethod
     def find(cls, namespace: str, hash: str) -> Optional[Tuple[StoredNode, common.NodeChunk]]:
@@ -150,20 +148,21 @@ class NodeChunk(peewee.Model):
                 NodeChunk.select()
                 .join(Chunk, on=(NodeChunk.chunk == Chunk.id))
                 .join(StoredNode, on=(NodeChunk.node == StoredNode.id))
-                .where(
-                    StoredNode.namespace == namespace,
-                    Chunk.hash == hash
-                )
+                .where(StoredNode.namespace == namespace, Chunk.hash == hash)
                 .first()
             )
             return (
-                node_chunk.node,
-                common.NodeChunk(
-                    hash=node_chunk.chunk.hash,
-                    size=node_chunk.chunk.size,
-                    offset=node_chunk.offset,
+                (
+                    node_chunk.node,
+                    common.NodeChunk(
+                        hash=node_chunk.chunk.hash,
+                        size=node_chunk.chunk.size,
+                        offset=node_chunk.offset,
+                    ),
                 )
-            ) if node_chunk else None
+                if node_chunk
+                else None
+            )
         except peewee.DoesNotExist:
             return None
 
@@ -211,7 +210,7 @@ class RemoteNode(peewee.Model):
                 size=self.size,
                 local_modified_time=0,
                 local_created_time=0,
-                ready=False
+                ready=False,
             )
         return stored_node
 
@@ -237,10 +236,7 @@ class Market(peewee.Model):
     @classmethod
     def create_or_update(cls, namespace: str, key: str, data: bytes) -> Market:
         namespace = Namespace.by_name(namespace)
-        market, created = cls.get_or_create(
-            namespace=namespace, key=key,
-            defaults={"data": data}
-        )
+        market, created = cls.get_or_create(namespace=namespace, key=key, defaults={"data": data})
         if not created:
             market.data = data
             market.save()

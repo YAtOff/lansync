@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 
 import peewee  # type: ignore
 
@@ -11,10 +12,7 @@ database = peewee.DatabaseProxy()
 def open_database(path, models=None):
     database_exists = path != ":memory:" and Path(path).exists()
     database.initialize(
-        peewee.SqliteDatabase(
-            path,
-            pragmas={"foreign_keys": 1,  "journal_mode": "wal"}
-        )
+        peewee.SqliteDatabase(path, pragmas={"foreign_keys": 1, "journal_mode": "wal"})
     )
     try:
         database.connect()
@@ -23,3 +21,13 @@ def open_database(path, models=None):
         yield database
     finally:
         database.close()
+
+
+transaction_lock = RLock()
+
+
+@contextmanager
+def atomic():
+    with transaction_lock:
+        with database.atomic():
+            yield

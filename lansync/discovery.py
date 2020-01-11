@@ -91,6 +91,7 @@ class Receiver:
 
     def run(self):
         client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if sys.platform == "linux":
             client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -116,6 +117,7 @@ class Sender:
 
     def run(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         if sys.platform == "linux":
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

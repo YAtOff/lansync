@@ -5,12 +5,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from lansync.database import atomic
 from lansync.session import Session
 from lansync.models import StoredNode, Namespace, RootFolder, NodeChunk as NodeChunkModel
 from lansync.common import NodeChunk
 from lansync.util.file import (
-    hash_path, file_checksum, read_file_chunks,
-    read_chunk, write_chunk, create_file_placeholder
+    hash_path,
+    file_checksum,
+    read_file_chunks,
+    read_chunk,
+    write_chunk,
+    create_file_placeholder,
 )
 
 
@@ -89,27 +94,29 @@ class LocalNode:
                 .execute()
             )
         """
-        if stored_node is not None:
-            stored_node.checksum = self.checksum
-            stored_node.size = self.size
-            stored_node.local_modified_time = self.modified_time
-            stored_node.local_created_time = self.created_time
-            stored_node.ready = True
-            stored_node.save()
-        else:
-            stored_node = StoredNode.create(
-                namespace=Namespace.for_session(session),
-                root_folder=RootFolder.for_session(session),
-                key=self.key,
-                path=self.path,
-                checksum=self.checksum,
-                size=self.size,
-                local_modified_time=self.modified_time,
-                local_created_time=self.created_time,
-                ready=True
-            )
+        chunks = self.chunks
+        with atomic():
+            if stored_node is not None:
+                stored_node.checksum = self.checksum
+                stored_node.size = self.size
+                stored_node.local_modified_time = self.modified_time
+                stored_node.local_created_time = self.created_time
+                stored_node.ready = True
+                stored_node.save()
+            else:
+                stored_node = StoredNode.create(
+                    namespace=Namespace.for_session(session),
+                    root_folder=RootFolder.for_session(session),
+                    key=self.key,
+                    path=self.path,
+                    checksum=self.checksum,
+                    size=self.size,
+                    local_modified_time=self.modified_time,
+                    local_created_time=self.created_time,
+                    ready=True,
+                )
 
-        for chunk in self.chunks:
-            NodeChunkModel.update_or_create(stored_node, chunk)
+            for chunk in chunks:
+                NodeChunkModel.update_or_create(stored_node, chunk)
 
         return stored_node
