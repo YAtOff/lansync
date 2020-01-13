@@ -5,7 +5,7 @@ DISCOVERY_PING_INTERVAL = 3
 SERVER_DB = "db/server.db"
 LOCAL_DB = "db/client.db"
 REMOTE_SERVER_URL = "http://localhost:5555"
-CLIENTS_PER_PEER = 5
+CLIENTS_PER_PEER = 2
 
 [development]
 ENVIRONMENT = "dev"
@@ -14,7 +14,7 @@ DISCOVERY_PING_INTERVAL = 10
 SERVER_DB = "db/server.db"
 LOCAL_DB = "db/client.db"
 REMOTE_SERVER_URL = "http://localhost:5555"
-CLIENTS_PER_PEER = 5
+CLIENTS_PER_PEER = 2
 
 [testing]
 ENVIRONMENT = "testing"
@@ -23,4 +23,4 @@ DISCOVERY_PING_INTERVAL = 10
 SERVER_DB = ":memory:"
 LOCAL_DB = "db/client.db"
 REMOTE_SERVER_URL = "http://localhost:5555"
-CLIENTS_PER_PEER = 5
+CLIENTS_PER_PEER = 2

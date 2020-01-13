@@ -1,5 +1,6 @@
 #!/bin/bash
 
-rm -rf db root root[0-9]
-mkdir db root root1
+rm -rf db storage
+mkdir db storage storage/root
+for i in {1..9}; do mkdir "storage/root${i}"; done
 

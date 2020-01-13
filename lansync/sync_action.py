@@ -138,12 +138,12 @@ def download(
 
         def on_done(self, result):
             client, chunk, chunk_position = self.context
-            logging.info("[CHUNK] Chunk downloaded: %s, %r", local_node.path, chunk)
+            logging.info(
+                "[CHUNK] Chunk downloaded [%s:%r] form %s",
+                local_node.path, chunk, client.peer.device_id
+            )
             chunk.check(result)
             local_node.write_chunk(chunk, result)
-            logging.info(
-                "[CHUNK] Chunk written to: %r", LocalNode.create(local_node.local_path, session)
-            )
             NodeChunkModel.update_or_create(stored_node, chunk)
             market.peers[device_id] = market.peers[device_id].mark(chunk_position)
             session.market_repo.save(market)
@@ -189,17 +189,19 @@ def download(
 
         client, chunk, chunk_position = pick_next_chunk()
         while client is not None:
-            logging.info("[CHUNK] Downloading chunk: %s, %r", local_node.path, chunk)
+            logging.info(
+                "[CHUNK] Downloading chunk [%s:%r] from %s",
+                local_node.path, chunk, client.peer.device_id
+            )
             tasks.submit(DownloadChunkTask((client, chunk, chunk_position)))
             client, chunk, chunk_position = pick_next_chunk()
 
-        if not tasks:
-            logging.info(
-                "[CHUNK] No chunks for [%s] found no market; doing exchange", local_node.path
-            )
+        if tasks.empty:
+            logging.info("[CHUNK] No chunks for [%s] found no market", local_node.path)
             for peer in peer_registry.iter_peers(session.namespace):
                 client = client_pool.aquire(peer)
                 if client is not None:
+                    logging.info("[CHUNK] Doing exchange with: %s", peer.device_id)
                     tasks.submit(ExchangeMarketTask((client, market, session)))
 
         tasks.wait_any()
@@ -270,7 +272,7 @@ class ExchangeMarketTask(Task):
 
     def on_done(self, result):
         client, market, session = self.context
-        logging.info("[CHUNK] Market exchanged")
+        logging.info("[CHUNK] Market exchanged with %s", client.peer.device_id)
         if result is not None:
             market.merge(result)
             session.market_repo.save(market)

@@ -1,10 +1,12 @@
 import os
 from pathlib import Path
 from threading import RLock
+import warnings
 from typing import Dict, List, Optional, Iterable
 
 import requests
 from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter  # type: ignore
+import urllib3.exceptions  # type: ignore
 
 from lansync.discovery import Peer
 from lansync.market import Market
@@ -27,13 +29,17 @@ class Client:
 
     def download_chunk(self, namespace: str, hash: str) -> bytes:
         url = f"https://{self.peer.address}:{self.peer.port}/chunk/{namespace}/{hash}"
-        response = self.session.get(url)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", urllib3.exceptions.SubjectAltNameWarning)
+            response = self.session.get(url)
         response.raise_for_status()
         return response.content
 
     def exchange_market(self, market: Market) -> Optional[Market]:
         url = f"https://{self.peer.address}:{self.peer.port}/market/{market.namespace}/{market.key}"
-        response = self.session.post(url, data=market.dump())
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", urllib3.exceptions.SubjectAltNameWarning)
+            response = self.session.post(url, data=market.dump())
         if response.status_code == 200:
             return Market.load(response.content)
         return None

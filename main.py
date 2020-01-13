@@ -20,6 +20,7 @@ logging.basicConfig(level=logging.INFO)
 def main(namespace: str, root_folder: str, once: bool):
     with open_database(settings.LOCAL_DB, models=all_models):
         device_id = Device.default_device_id()
+        logging.info("Starting cleint with device id: %s", device_id)
         session = Session.create(namespace, root_folder, device_id)
         session_instance.configure(session)
 
