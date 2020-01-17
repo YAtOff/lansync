@@ -87,12 +87,13 @@ class LocalNode:
 
     def store(self, session: Session, stored_node: Optional[StoredNode]) -> StoredNode:
         """
-        # TODO: maybe use:
+        TODO: maybe use:
             (StoredNode
                 .insert(**kwargs)
                 .on_conflict("replace")
                 .execute()
             )
+        TODO: clear unused chunks
         """
         chunks = self.chunks
         with atomic():

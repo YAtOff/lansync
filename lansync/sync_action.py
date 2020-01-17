@@ -51,6 +51,7 @@ def action(func):
 def upload(
     local_node: LocalNode, stored_node: Optional[StoredNode], session: Session
 ) -> SyncActionResult:
+    local_node.store(session, stored_node)
     event = NodeEvent(
         key=local_node.key,
         operation=NodeOperation.CREATE,
@@ -61,7 +62,6 @@ def upload(
         chunks=local_node.chunks,
     )
     RemoteClient(session).push_events([event])
-    local_node.store(session, stored_node)
     RemoteEventHandler(session).handle_new_events()
 
     peers = session.peer_registry.peers_for_namespace(session.namespace)
