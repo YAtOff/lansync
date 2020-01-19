@@ -29,12 +29,10 @@ class Session:
     remote_server_url: str
     device_id: str
     peer_registry: PeerRegistry
-    market_repo: Any
     client_pool: Any
 
     @classmethod
     def create(cls, namespace: str, root_folder: str, device_id: str) -> Session:
-        from lansync.market import MarketRepo
         from lansync.client import ClientPool
 
         return cls(
@@ -43,7 +41,6 @@ class Session:
             remote_server_url=settings.REMOTE_SERVER_URL,
             device_id=device_id,
             peer_registry=PeerRegistry(),
-            market_repo=MarketRepo(),
             client_pool=ClientPool(settings.CLIENTS_PER_PEER)
         )
 

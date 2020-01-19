@@ -4,11 +4,11 @@ import math
 import random
 from dataclasses import dataclass
 from itertools import zip_longest
-from threading import RLock
 from typing import Any, Dict, Iterable, Optional, Tuple
 
-from lansync import models
+from lansync.database import atomic
 from lansync.avro_serializer import SerializerMixin
+from lansync import models
 
 
 @dataclass
@@ -107,6 +107,26 @@ class Market(SerializerMixin):
         market.peers[current] = ChunkSet.empty(chunks_count)
         return market
 
+    @classmethod
+    def load_from_db(cls, namespace: str, key: str) -> Optional[Market]:
+        db_instance = models.Market.find(namespace, key)
+        return cls.load(db_instance.data) if db_instance is not None else None
+
+    def exchange_with_db(self):
+        with atomic():
+            db_instance = models.Market.find(self.namespace, self.key)
+            if db_instance is None:
+                models.Market.create(
+                    namespace=models.Namespace.by_name(self.namespace),
+                    key=self.key,
+                    data=self.dump()
+                )
+            else:
+                other = Market.load(db_instance.data)
+                self.merge(other)
+                db_instance.data = self.dump()
+                db_instance.save()
+
     def as_record(self) -> Dict[str, Any]:
         return {
             "namespace": self.namespace,
@@ -130,30 +150,3 @@ class Market(SerializerMixin):
 
 
 MarketKey = Tuple[str, str]
-
-
-class MarketRepo:
-    markets: Dict[MarketKey, Market]
-
-    def __init__(self):
-        self.markets = {}
-        self.lock = RLock()
-
-    def load(self, namespace: str, key: str) -> Optional[Market]:
-        with self.lock:
-            market_key = (namespace, key)
-            if market_key not in self.markets:
-                db_instance = models.Market.find(*market_key)
-                market = Market.load(db_instance.data) if db_instance is not None else None
-                self.markets[market_key] = market
-            return self.markets[market_key]
-
-    def save(self, market: Market) -> Market:
-        with self.lock:
-            market_key = (market.namespace, market.key)
-            current_market = self.markets.get(market_key)
-            if current_market:
-                market.merge(current_market)
-            self.markets[market_key] = market
-            models.Market.create_or_update(market.namespace, market.key, market.dump())
-            return market

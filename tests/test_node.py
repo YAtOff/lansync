@@ -7,11 +7,11 @@ from unittest.mock import Mock
 import pytest
 from faker import Faker, providers
 
+from lansync import common
 from lansync.database import open_database
 from lansync.discovery import Peer
 from lansync.models import Chunk, Market, NodeChunk, StoredNode, all_models
-from lansync.node import LocalNode
-from lansync import common
+from lansync.node import LocalNode, store_new_node
 from lansync.session import RootFolder
 
 fake = Faker()
@@ -74,10 +74,10 @@ def test_find_chunk_by_hash(db, file_manager, session):
     local_node = LocalNode.create(
         file_manager.create_file(1024 * 1024 * 2 + 1024), session
     )
-    stored_node = local_node.store(session, None)
+    full_node = store_new_node(local_node, session, None)
 
     chunk1 = local_node.chunks[0]
-    _, chunk2 = NodeChunk.find(session.namespace, chunk1.hash)
+    chunk2, _ = NodeChunk.find(session.namespace, chunk1.hash)
     assert chunk1 == chunk2
 
-    assert stored_node.chunks == local_node.chunks
+    assert full_node.stored_node.chunks == local_node.chunks

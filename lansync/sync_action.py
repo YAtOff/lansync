@@ -1,13 +1,13 @@
 import logging
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Callable, Optional, Set
+from typing import Callable, Optional
 
-from lansync.common import NodeChunk, NodeEvent, NodeOperation
-from lansync.market import Market
-from lansync.models import NodeChunk as NodeChunkModel
-from lansync.models import RemoteNode, RootFolder, StoredNode
-from lansync.node import LocalNode
+from lansync.common import NodeEvent, NodeOperation
+from lansync.database import atomic
+from lansync.node_market import NodeMarket
+from lansync.models import RemoteNode, StoredNode
+from lansync.node import LocalNode, store_new_node, create_node_placeholder
 from lansync.remote import RemoteClient, RemoteEventHandler
 from lansync.session import Session
 from lansync.util.task import TaskList, Task
@@ -51,7 +51,10 @@ def action(func):
 def upload(
     local_node: LocalNode, stored_node: Optional[StoredNode], session: Session
 ) -> SyncActionResult:
-    local_node.store(session, stored_node)
+    logging.info("[CHUNK] New node [%s]", local_node.path)
+    _, _, _, _, available_chunks = store_new_node(local_node, session, stored_node)
+
+    # Publish event for new node
     event = NodeEvent(
         key=local_node.key,
         operation=NodeOperation.CREATE,
@@ -64,15 +67,15 @@ def upload(
     RemoteClient(session).push_events([event])
     RemoteEventHandler(session).handle_new_events()
 
+    # Create market for new node and exchange with all
     peers = session.peer_registry.peers_for_namespace(session.namespace)
-    market = Market.for_file_provider(
+    market = NodeMarket.for_file_provider(
         namespace=session.namespace,
         key=local_node.key,
-        src=session.device_id,
+        device_id=session.device_id,
         peers=[peer.device_id for peer in peers],
-        chunks_count=len(local_node.chunks),
+        chunk_hashes=available_chunks
     )
-    session.market_repo.save(market)
 
     tasks = TaskList()
     for peer in peers:
@@ -81,7 +84,7 @@ def upload(
             logging.info(
                 "[CHUNK] Exchange node [%s] market with [%s]", local_node.path, peer.device_id
             )
-            tasks.submit(ExchangeMarketTask((client, market, session)))
+            tasks.submit(ExchangeMarketTask(client, market, session))
 
     tasks.wait_all()
 
@@ -92,109 +95,111 @@ def upload(
 def download(
     remote_node: RemoteNode, stored_node: Optional[StoredNode], session: Session
 ) -> SyncActionResult:
+    logging.info("[CHUNK] Downloading node [%s]", remote_node.path)
     peer_registry = session.peer_registry
     if peer_registry.empty:
         return SyncActionResult()
     client_pool = session.client_pool
     device_id = session.device_id
 
-    stored_node = remote_node.store(RootFolder.for_session(session), stored_node=stored_node,)
-    local_node = LocalNode.create_placeholder(stored_node.local_path, stored_node.size, session)
+    (
+        stored_node,
+        local_node,
+        all_chunks,
+        needed_chunks,
+        available_chunks
+    ) = create_node_placeholder(remote_node, session)
 
-    market = session.market_repo.load(session.namespace, remote_node.key)
-    if market is None:
-        market = Market.for_file_consumer(
-            namespace=session.namespace,
-            key=remote_node.key,
-            peers=[peer.device_id for peer in peer_registry.peers_for_namespace(session.namespace)],
-            chunks_count=len(remote_node.chunks),
-            current=device_id,
-        )
-        session.market_repo.save(market)
-        logging.info("[CHUNK] Created market for node [%s]", local_node.path)
-
-    all_chunks = [NodeChunk(**c) for c in remote_node.chunks]
-    needed_chunks: Set[int] = set()
-    for i, chunk in enumerate(all_chunks):
-        node_chunk_pair = NodeChunkModel.find(session.namespace, chunk.hash)
-        if node_chunk_pair:
-            node, available_chunk = node_chunk_pair
-            logging.info(
-                "[CHUNK] found local chunk for node [%s]: [%r]", local_node.path, available_chunk
-            )
-            local_node.transfer_chunk(node.local_path, available_chunk)
-            NodeChunkModel.update_or_create(stored_node, available_chunk)
-            market.peers[device_id] = market.peers[device_id].mark(i)
-        else:
-            needed_chunks.add(i)
-    session.market_repo.save(market)
+    market = NodeMarket.for_file_consumer(
+        namespace=session.namespace,
+        key=remote_node.key,
+        device_id=device_id,
+        peers=[peer.device_id for peer in peer_registry.peers_for_namespace(session.namespace)],
+        chunk_hashes=needed_chunks | available_chunks
+    )
+    for chunk_hash in available_chunks:
+        market.provide_chunk(chunk_hash)
 
     tasks = TaskList()
 
     class DownloadChunkTask(Task):
+        def __init__(self, client, chunks):
+            self.client = client
+            self.chunks = chunks
+            self.chunk_hash = chunks[0].hash
+            super().__init__((client, chunks))
+
         def execute(self, *args, **kwargs):
-            client, chunk, _ = self.context
-            return client.download_chunk(session.namespace, chunk.hash)
+            return self.client.download_chunk(session.namespace, self.chunk_hash)
 
         def on_done(self, result):
-            client, chunk, chunk_position = self.context
             logging.info(
                 "[CHUNK] Chunk downloaded [%s:%r] form %s",
-                local_node.path, chunk, client.peer.device_id
+                local_node.path, self.chunk_hash, self.client.peer.device_id
             )
-            chunk.check(result)
-            local_node.write_chunk(chunk, result)
-            NodeChunkModel.update_or_create(stored_node, chunk)
-            market.peers[device_id] = market.peers[device_id].mark(chunk_position)
-            session.market_repo.save(market)
+            self.chunks[0].check(result)
+            with atomic():
+                for chunk in self.chunks:
+                    local_node.write_chunk(chunk, result)
+                    market.provide_chunk(self.chunk_hash)
+            available_chunks.add(self.hash)
 
+            chunk_consumers = set(market.find_consumers(self.chunks_hash))
             client = client_pool.try_aquire_peer(
                 peer
                 for peer in peer_registry.iter_peers(session.namespace)
-                if peer.device_id in market.peers
-                and not market.peers[peer.device_id].has(chunk_position)
+                if peer.device_id in chunk_consumers
             )
             if client is not None:
-                tasks.submit(ExchangeMarketTask((client, market, session)))
+                tasks.submit(ExchangeMarketTask(client, market, session))
 
         def on_error(self, error):
-            _, _, chunk_position = self.context
-            needed_chunks.add(chunk_position)
+            _, chunks = self.context
+            needed_chunks.add(chunks[0].hash)
 
         def cleanup(self):
-            client, _, _ = self.context
+            client, _ = self.context
             client_pool.release(client)
 
-    def pick_next_chunk():
-        for peer in peer_registry.iter_peers(session.namespace):
-            peer_chunks = market.peers.get(peer.device_id)
-            if peer_chunks is not None:
-                for i in shuffled(needed_chunks):
-                    if peer_chunks.has(i):
-                        client = client_pool.aquire(peer)
-                        if client is not None:
-                            needed_chunks.remove(i)
-                            return client, all_chunks[i], i
-        return None, None, None
+    def pick_next_chunks():
+        live_peers = {
+            peer.device_id: peer
+            for peer in peer_registry.live_peers(session.namespace)
+        }
+        peer_chunk_pairs = (
+            (peer, chunk_hash)
+            for chunk_hash in shuffled(needed_chunks)
+            for device_id in market.find_providers(chunk_hash)
+            for peer in (live_peers.get(device_id),)
+            if peer is not None
+        )
+        for peer, chunk_hash in peer_chunk_pairs:
+            client = client_pool.aquire(peer)
+            if client is not None:
+                needed_chunks.remove(chunk_hash)
+                return client, all_chunks[chunk_hash]
+        return None, None
 
     while True:
         icons = [
-            "✔" if market.peers[device_id].has(i) else "✖" if i in needed_chunks else "⌛"
-            for i, chunk in enumerate(all_chunks)
+            "✔" if chunk_hash in available_chunks
+            else "✖" if chunk_hash in needed_chunks
+            else "⌛"
+            for chunk_hash in all_chunks.keys()
         ]
         logging.info("[CHUNK] status: %s", " ".join(icons))
 
-        if not needed_chunks:
+        if len(available_chunks) == len(all_chunks):
             break
 
-        client, chunk, chunk_position = pick_next_chunk()
+        client, chunks = pick_next_chunks()
         while client is not None:
             logging.info(
                 "[CHUNK] Downloading chunk [%s:%r] from %s",
-                local_node.path, chunk, client.peer.device_id
+                local_node.path, chunks[0].hash, client.peer.device_id
             )
-            tasks.submit(DownloadChunkTask((client, chunk, chunk_position)))
-            client, chunk, chunk_position = pick_next_chunk()
+            tasks.submit(DownloadChunkTask(client, chunks))
+            client, chunks = pick_next_chunks()
 
         if tasks.empty:
             logging.info("[CHUNK] No chunks for [%s] found no market", local_node.path)
@@ -202,7 +207,7 @@ def download(
                 client = client_pool.aquire(peer)
                 if client is not None:
                     logging.info("[CHUNK] Doing exchange with: %s", peer.device_id)
-                    tasks.submit(ExchangeMarketTask((client, market, session)))
+                    tasks.submit(ExchangeMarketTask(client, market, session))
 
         tasks.wait_any()
 
@@ -216,7 +221,7 @@ def delete_local(
     local_node: LocalNode, stored_node: StoredNode, session: Session
 ) -> SyncActionResult:
     local_node.local_path.unlink()
-    stored_node.delete().execute()
+    stored_node.delete_instance()
     return SyncActionResult()
 
 
@@ -231,7 +236,7 @@ def delete_remote(
         timestamp=now_as_iso(),
     )
     RemoteClient(session).push_events([event])
-    stored_node.delete().execute()
+    stored_node.delete_instance()
     RemoteEventHandler(session).handle_new_events()
     return SyncActionResult()
 
@@ -240,13 +245,13 @@ def delete_remote(
 def save_stored(
     remote_node: RemoteNode, local_node: LocalNode, session: Session
 ) -> SyncActionResult:
-    local_node.store(session, None)
+    store_new_node(local_node, session, None)
     return SyncActionResult()
 
 
 @action
 def delete_stored(stored_node: StoredNode, session: Session) -> SyncActionResult:
-    stored_node.delete().execute()
+    stored_node.delete_instance()
     return SyncActionResult()
 
 
@@ -266,20 +271,22 @@ def nop(session: Session) -> SyncActionResult:
 
 
 class ExchangeMarketTask(Task):
+    def __init__(self, client, market, session):
+        self.client = client
+        self.market = market
+        self.session = session
+        super().__init__((client, market, session))
+
     def execute(self, *args, **kwargs):
-        client, market, _ = self.context
-        return client.exchange_market(market)
+        return self.client.exchange_market(self.market.market)
 
     def on_done(self, result):
-        client, market, session = self.context
-        logging.info("[CHUNK] Market exchanged with %s", client.peer.device_id)
+        logging.info("[CHUNK] Market exchanged with %s", self.client.peer.device_id)
         if result is not None:
-            market.merge(result)
-            session.market_repo.save(market)
+            self.market.exchange(result)
 
     def on_error(self, error):
         pass
 
     def cleanup(self):
-        client, _, session = self.context
-        session.client_pool.release(client)
+        self.session.client_pool.release(self.client)

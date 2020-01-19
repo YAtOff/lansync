@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
-from typing import Optional, List, Tuple
+from typing import List, Tuple, Callable, Optional
 
 import peewee  # type: ignore
 
@@ -12,6 +12,7 @@ from lansync.session import Session
 from lansync import common
 from lansync.util.db_fields import JSONField
 from lansync.util.misc import all_subclasses
+from lansync.util.file import read_chunk
 
 
 class Device(peewee.Model):
@@ -141,7 +142,9 @@ class NodeChunk(peewee.Model):
             return node_chunk
 
     @classmethod
-    def find(cls, namespace: str, hash: str) -> Optional[Tuple[StoredNode, common.NodeChunk]]:
+    def find(
+        cls, namespace: str, hash: str
+    ) -> Optional[Tuple[common.NodeChunk, Callable[[], bytes]]]:
         try:
             namespace = Namespace.by_name(namespace)
             node_chunk = (
@@ -153,11 +156,13 @@ class NodeChunk(peewee.Model):
             )
             return (
                 (
-                    node_chunk.node,
                     common.NodeChunk(
                         hash=node_chunk.chunk.hash,
                         size=node_chunk.chunk.size,
                         offset=node_chunk.offset,
+                    ),
+                    lambda: read_chunk(
+                        node_chunk.node.local_path, node_chunk.offset, node_chunk.chunk.size
                     ),
                 )
                 if node_chunk
@@ -192,28 +197,6 @@ class RemoteNode(peewee.Model):
             .scalar()
         )
 
-    def store(self, root_folder: RootFolder, stored_node: StoredNode = None) -> StoredNode:
-        if stored_node is not None:
-            stored_node.size = self.size
-            stored_node.checksum = self.checksum
-            stored_node.local_modified_time = 0
-            stored_node.local_created_time = 0
-            stored_node.ready = False
-            stored_node.save()
-        else:
-            stored_node = StoredNode.create(
-                namespace=self.namespace,
-                root_folder=root_folder,
-                key=self.key,
-                path=self.path,
-                checksum=self.checksum,
-                size=self.size,
-                local_modified_time=0,
-                local_created_time=0,
-                ready=False,
-            )
-        return stored_node
-
 
 class Market(peewee.Model):
     id = peewee.AutoField()
@@ -232,15 +215,6 @@ class Market(peewee.Model):
             .where(Namespace.name == namespace, cls.key == key)
             .first()
         )
-
-    @classmethod
-    def create_or_update(cls, namespace: str, key: str, data: bytes) -> Market:
-        namespace = Namespace.by_name(namespace)
-        market, created = cls.get_or_create(namespace=namespace, key=key, defaults={"data": data})
-        if not created:
-            market.data = data
-            market.save()
-        return market
 
 
 all_models = all_subclasses(peewee.Model)

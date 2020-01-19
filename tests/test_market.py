@@ -1,9 +1,11 @@
+from plistlib import loads
+
 import pytest
 from faker import Faker, providers
 
 from lansync import models
 from lansync.database import open_database
-from lansync.market import ChunkSet, Market, MarketRepo
+from lansync.market import ChunkSet, Market
 
 fake = Faker()
 fake.add_provider(providers.misc)
@@ -97,21 +99,21 @@ def test_merge_markets():
     assert market1.peers[device2].has(1)
 
 
-def test_market_repo(db):
+def test_market_load_save(db):
     namespace = fake.user_name()
     key = fake.md5()
-    repo = MarketRepo()
+
     market1 = Market(
         namespace=namespace, key=key,
         peers={fake.uuid4(): ChunkSet(1, fake.binary(1)) for _ in range(1)},
     )
-    market1 = repo.save(market1)
+    market1.exchange_with_db()
     market2 = Market(
         namespace=namespace, key=key,
         peers={fake.uuid4(): ChunkSet(1, fake.binary(1)) for _ in range(1)},
     )
-    market2 = repo.save(market2)
-    market3 = MarketRepo().load(namespace, key)
+    market2.exchange_with_db()
+    market3 = Market.load_from_db(namespace, key)
 
     assert market2 == market3
     assert len(market2.peers) == 2

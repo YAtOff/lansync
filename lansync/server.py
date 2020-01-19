@@ -11,8 +11,6 @@ from werkzeug.serving import make_server, run_simple
 
 from lansync.models import NodeChunk
 from lansync.market import Market
-from lansync.node import LocalNode
-from lansync.session import instance as session
 
 
 certs_dir = Path.cwd() / "certs"
@@ -23,15 +21,8 @@ app = Flask(__name__)
 
 @app.route("/market/<namespace_name>/<key>", methods=["POST"])
 def exchange(namespace_name, key):
-    other_market = Market.load_from_file(request.stream)
-
-    market = session.market_repo.load(namespace_name, key)
-    if market is not None:
-        market.merge(other_market)
-        market = session.market_repo.save(market)
-    else:
-        market = session.market_repo.save(other_market)
-
+    market = Market.load_from_file(request.stream)
+    market.exchange_with_db()
     fd = BytesIO()
     market.dump_to_file(fd)
     fd.seek(os.SEEK_SET)
@@ -44,14 +35,12 @@ def chunk(namespace_name, content_hash):
     if node_chunk_pair is None:
         return jsonify({"ok": False, "error": "Not found"}), 404
 
-    node, chunk = node_chunk_pair
+    chunk, read_chunk = node_chunk_pair
 
     if request.method == "HEAD":
         return "", 200
 
-    local_node = LocalNode.create(node.local_path, session)
-    print("Reading chunk", chunk, "from", node.local_path)
-    fd = BytesIO(local_node.read_chunk(chunk))
+    fd = BytesIO(read_chunk())
     return send_file(fd, mimetype="application/octet-stream")
 
 
