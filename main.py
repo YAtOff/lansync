@@ -9,8 +9,7 @@ from lansync.models import Device, all_models
 from lansync.server import run_in_thread as run_server
 from lansync.session import Session, instance as session_instance
 from lansync.sync import SyncWorker
-
-logging.basicConfig(level=logging.INFO)
+from lansync.log import configure_logging
 
 
 @click.command()
@@ -20,6 +19,7 @@ logging.basicConfig(level=logging.INFO)
 def main(namespace: str, root_folder: str, once: bool):
     with open_database(settings.LOCAL_DB, models=all_models):
         device_id = Device.default_device_id()
+        configure_logging(device_id)
         logging.info("Starting cleint with device id: %s", device_id)
         session = Session.create(namespace, root_folder, device_id)
         session_instance.configure(session)

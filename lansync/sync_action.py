@@ -139,6 +139,11 @@ def download(
                 "[CHUNK] Chunk downloaded [%s:%r] form %s",
                 local_node.path, self.chunk_hash, self.client.peer.device_id
             )
+            session.stats.emit_chunk_download(
+                (session.namespace, stored_node.key, stored_node.checksum),
+                self.client.peer,
+                len(result)
+            )
             self.chunks[0].check(result)
             with atomic():
                 for chunk in self.chunks:
@@ -287,6 +292,10 @@ class ExchangeMarketTask(Task):
         logging.info("[CHUNK] Market exchanged with %s", self.client.peer.device_id)
         if result is not None:
             self.market.exchange(result)
+            self.session.stats.emit_market_exchange(
+                (self.market.namespace, *self.market.key.split(":")),
+                self.client.peer
+            )
 
     def on_error(self, error):
         pass
