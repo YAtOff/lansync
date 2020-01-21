@@ -22,9 +22,9 @@ class NodeOperation(str, enum.Enum):
 
 @dataclass
 class NodeChunk:
-    hash: str
-    size: int
     offset: int
+    size: int
+    hash: str
 
     def check(self, data: bytes):
         assert len(data) == self.size and buffer_checksum(data) == self.hash
@@ -39,4 +39,5 @@ class NodeEvent:
     checksum: Optional[str] = None
     size: Optional[int] = None
     chunks: Optional[List[NodeChunk]] = None
+    signature: Optional[str] = None
     sequence_number: Optional[int] = None

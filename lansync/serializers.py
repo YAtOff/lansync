@@ -18,3 +18,4 @@ class NodeEventSerializer(Schema):
     chunks = fields.List(
         fields.Nested(NodeChunkSerializer), allow_none=True
     )
+    signature = fields.Str(allow_none=True)

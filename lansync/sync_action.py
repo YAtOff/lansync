@@ -52,7 +52,7 @@ def upload(
     local_node: LocalNode, stored_node: Optional[StoredNode], session: Session
 ) -> SyncActionResult:
     logging.info("[CHUNK] New node [%s]", local_node.path)
-    _, _, _, _, available_chunks = store_new_node(local_node, session, stored_node)
+    stored_node, _, all_chunks, _, _, available_chunks = store_new_node(local_node, session, stored_node)
 
     # Publish event for new node
     event = NodeEvent(
@@ -62,7 +62,8 @@ def upload(
         timestamp=now_as_iso(),
         checksum=local_node.checksum,
         size=local_node.size,
-        chunks=local_node.chunks,
+        chunks=all_chunks,
+        signature=stored_node.signature
     )
     RemoteClient(session).push_events([event])
     RemoteEventHandler(session).handle_new_events()
@@ -71,7 +72,7 @@ def upload(
     peers = session.peer_registry.peers_for_namespace(session.namespace)
     market = NodeMarket.for_file_provider(
         namespace=session.namespace,
-        key=local_node.key,
+        key=f"{local_node.key}:{local_node.checksum}",
         device_id=session.device_id,
         peers=[peer.device_id for peer in peers],
         chunk_hashes=available_chunks
@@ -106,13 +107,14 @@ def download(
         stored_node,
         local_node,
         all_chunks,
+        chunk_index,
         needed_chunks,
         available_chunks
     ) = create_node_placeholder(remote_node, session)
 
     market = NodeMarket.for_file_consumer(
         namespace=session.namespace,
-        key=remote_node.key,
+        key=f"{remote_node.key}:{remote_node.checksum}",
         device_id=device_id,
         peers=[peer.device_id for peer in peer_registry.peers_for_namespace(session.namespace)],
         chunk_hashes=needed_chunks | available_chunks
@@ -178,7 +180,7 @@ def download(
             client = client_pool.aquire(peer)
             if client is not None:
                 needed_chunks.remove(chunk_hash)
-                return client, all_chunks[chunk_hash]
+                return client, chunk_index[chunk_hash]
         return None, None
 
     while True:
@@ -186,11 +188,11 @@ def download(
             "✔" if chunk_hash in available_chunks
             else "✖" if chunk_hash in needed_chunks
             else "⌛"
-            for chunk_hash in all_chunks.keys()
+            for chunk_hash in chunk_index.keys()
         ]
         logging.info("[CHUNK] status: %s", " ".join(icons))
 
-        if len(available_chunks) == len(all_chunks):
+        if len(available_chunks) == len(chunk_index):
             break
 
         client, chunks = pick_next_chunks()

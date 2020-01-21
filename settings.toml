@@ -6,6 +6,10 @@ SERVER_DB = "db/server.db"
 LOCAL_DB = "db/client.db"
 REMOTE_SERVER_URL = "http://localhost:5555"
 CLIENTS_PER_PEER = 2
+CHUNK_SIZE =  1048576
+CHUNK_HASH_FUNC = "md5"
+STORAGE_FOLDER = "storage"
+METADATA_FOLDER = "metadata"
 
 [development]
 ENVIRONMENT = "dev"
@@ -15,6 +19,10 @@ SERVER_DB = "db/server.db"
 LOCAL_DB = "db/client.db"
 REMOTE_SERVER_URL = "http://localhost:5555"
 CLIENTS_PER_PEER = 2
+CHUNK_SIZE =  1048576
+CHUNK_HASH_FUNC = "md5"
+STORAGE_FOLDER = "storage"
+METADATA_FOLDER = "metadata"
 
 [testing]
 ENVIRONMENT = "testing"
@@ -24,3 +32,7 @@ SERVER_DB = ":memory:"
 LOCAL_DB = "db/client.db"
 REMOTE_SERVER_URL = "http://localhost:5555"
 CLIENTS_PER_PEER = 2
+CHUNK_SIZE =  1024
+CHUNK_HASH_FUNC = "md5"
+STORAGE_FOLDER = "storage"
+METADATA_FOLDER = "metadata"

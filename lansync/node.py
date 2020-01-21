@@ -1,28 +1,28 @@
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
 import logging
-from pathlib import Path
+import os
 import shutil
+from base64 import b64encode
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, NamedTuple, Optional, Set, Union
 from uuid import uuid4
-from typing import Set, Optional, NamedTuple, List, Dict
 
-from lansync.database import atomic
-from lansync.models import (
-    RemoteNode, StoredNode, RootFolder, NodeChunk as NodeChunkModel,
-    Namespace
-)
-from lansync.session import Session
+from dynaconf import settings  # type: ignore
+from typing_extensions import Literal
+
+import librsync  # type: ignore
+
+from lansync.chunk import calc_initial_chunks, calc_new_chunks
 from lansync.common import NodeChunk
-from lansync.util.file import (
-    hash_path,
-    file_checksum,
-    read_file_chunks,
-    read_chunk,
-    write_chunk,
-    create_file_placeholder,
-)
+from lansync.database import atomic
+from lansync.models import Namespace
+from lansync.models import NodeChunk as NodeChunkModel
+from lansync.models import RemoteNode, RootFolder, StoredNode
+from lansync.session import Session
+from lansync.util.file import (create_file_placeholder, create_temp_file, file_checksum, hash_path,
+                               read_chunk, write_chunk)
 from lansync.util.misc import index_by
 
 
@@ -35,6 +35,7 @@ class LocalNode:
     created_time: float
     size: int
     _checksum: Optional[str]
+    _signature: Optional[bytes] = None
 
     def __post_init__(self):
         self.key = hash_path(self.path)
@@ -78,10 +79,6 @@ class LocalNode:
             self._checksum = file_checksum(self.local_fspath) or ""
         return self._checksum
 
-    @property
-    def chunks(self) -> List[NodeChunk]:
-        return [NodeChunk(*c) for c in read_file_chunks(self.local_fspath)]
-
     def read_chunk(self, chunk: NodeChunk) -> bytes:
         return read_chunk(self.local_path, chunk.offset, chunk.size)
 
@@ -96,11 +93,33 @@ class LocalNode:
         data = read_chunk(src, chunk.offset, chunk.size)
         self.write_chunk(chunk, data)
 
+    def calc_signature(self, format=Union[Literal["binary"], Literal["base64"]]) -> Union[str, bytes]:
+        if self._signature is None:
+            with create_temp_file() as f:
+                librsync.signature_from_paths(
+                    self.local_fspath, f, block_len=settings.CHUNK_SIZE
+                )
+                self._signature = Path(f).read_bytes()
+
+        if format == "binary":
+            return self._signature
+        elif format == "base64":
+            return b64encode(self._signature)
+        else:
+            raise ValueError("Invalid format", format)
+
+    def calc_chunks(self, signature: Optional[str]) -> List[NodeChunk]:
+        if signature is None:
+            return calc_initial_chunks(self.local_fspath)
+        else:
+            return calc_new_chunks(self.local_fspath, signature)
+
 
 class FullNode(NamedTuple):
     stored_node: StoredNode
     local_node: LocalNode
-    all_chunks: Dict[str, List[NodeChunk]]
+    all_chunks: List[NodeChunk]
+    chunk_index: Dict[str, List[NodeChunk]]
     needed_chunks: Set[str]
     available_chunk: Set[str]
 
@@ -108,7 +127,13 @@ class FullNode(NamedTuple):
 def store_new_node(
     local_node: LocalNode, session: Session, stored_node: Optional[StoredNode]
 ) -> FullNode:
-    chunks = local_node.chunks
+    if stored_node is not None:
+        signature = stored_node.signature
+        chunks = local_node.calc_chunks(signature=signature)
+    else:
+        signature = local_node.calc_signature(format="base64")
+        chunks = local_node.calc_chunks(None)
+
     with atomic():
         new_node = StoredNode.create(
             namespace=Namespace.for_session(session),
@@ -120,6 +145,7 @@ def store_new_node(
             local_modified_time=local_node.modified_time,
             local_created_time=local_node.created_time,
             ready=False,
+            signature=signature
         )
 
         for chunk in chunks:
@@ -132,9 +158,9 @@ def store_new_node(
         new_node.ready = True
         new_node.save()
 
-        all_chunks = index_by("hash")(chunks)
+        chunk_index = index_by("hash")(chunks)
         return FullNode(
-            new_node, local_node, all_chunks, set(), set(all_chunks.keys())
+            new_node, local_node, chunks, chunk_index, set(), set(chunk_index.keys())
         )
 
 
@@ -144,22 +170,24 @@ def create_node_placeholder(remote_node: RemoteNode, session: Session) -> FullNo
         stored_node = StoredNode.create(
             namespace=remote_node.namespace,
             root_folder=RootFolder.for_session(session),
-            key=temp_path,
+            key=hash_path(temp_path),
             path=temp_path,
             checksum=remote_node.checksum,
             size=remote_node.size,
             local_modified_time=0,
             local_created_time=0,
             ready=False,
+            signature=remote_node.signature
         )
         local_node = LocalNode.create_placeholder(
             stored_node.local_path, stored_node.size, session
         )
 
-        all_chunks = index_by("hash")(NodeChunk(**c) for c in remote_node.chunks)
+        all_chunks = [NodeChunk(**c) for c in remote_node.chunks]
+        chunk_index = index_by("hash")(all_chunks)
         needed_chunks: Set[str] = set()
         available_chunks: Set[str] = set()
-        for chunk_hash, chunks in all_chunks.items():
+        for chunk_hash, chunks in chunk_index.items():
             node_chunk_pair = NodeChunkModel.find(session.namespace, chunk_hash)
             if node_chunk_pair:
                 available_chunk, read_chunk = node_chunk_pair
@@ -180,4 +208,4 @@ def create_node_placeholder(remote_node: RemoteNode, session: Session) -> FullNo
         shutil.move(local_node.local_path, stored_node.local_path)
         local_node = LocalNode.create(stored_node.local_path, session)
 
-        return FullNode(stored_node, local_node, all_chunks, needed_chunks, available_chunks)
+        return FullNode(stored_node, local_node, all_chunks, chunk_index, needed_chunks, available_chunks)

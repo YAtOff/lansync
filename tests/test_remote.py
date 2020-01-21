@@ -1,3 +1,4 @@
+from base64 import b64encode
 from dataclasses import asdict
 import random
 from unittest.mock import Mock
@@ -37,7 +38,8 @@ def create_event(**overrides):
             "chunks": [
                 NodeChunk(fake.md5(), fake.pyint(1, 128), fake.pyint(0, 1023))
                 for _ in range(random.randint(0, 10))
-            ]
+            ],
+            "signature": b64encode(fake.binary())
         })
     event.update(overrides)
 

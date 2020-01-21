@@ -10,7 +10,7 @@ from faker import Faker, providers
 from lansync import common
 from lansync.database import open_database
 from lansync.discovery import Peer
-from lansync.models import Chunk, Market, NodeChunk, StoredNode, all_models
+from lansync.models import Chunk, NodeChunk, StoredNode, all_models
 from lansync.node import LocalNode, store_new_node
 from lansync.session import RootFolder
 
@@ -76,8 +76,8 @@ def test_find_chunk_by_hash(db, file_manager, session):
     )
     full_node = store_new_node(local_node, session, None)
 
-    chunk1 = local_node.chunks[0]
+    chunk1 = full_node.all_chunks[0]
     chunk2, _ = NodeChunk.find(session.namespace, chunk1.hash)
     assert chunk1 == chunk2
 
-    assert full_node.stored_node.chunks == local_node.chunks
+    assert full_node.stored_node.chunks == full_node.all_chunks

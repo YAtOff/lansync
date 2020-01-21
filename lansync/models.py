@@ -76,6 +76,7 @@ class StoredNode(peewee.Model):
     local_created_time = peewee.IntegerField()
     ready = peewee.BooleanField(default=False)
     size = peewee.IntegerField()
+    signature = peewee.TextField()
 
     class Meta:
         database = database
@@ -182,6 +183,7 @@ class RemoteNode(peewee.Model):
     checksum = peewee.CharField(null=True)
     chunks = JSONField(null=True)
     size = peewee.IntegerField()
+    signature = peewee.TextField()
 
     class Meta:
         database = database

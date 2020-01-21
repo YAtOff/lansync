@@ -27,6 +27,7 @@ class NodeEvent(peewee.Model):
     checksum = peewee.CharField(null=True)
     size = peewee.IntegerField(null=True)
     chunks = JSONField(null=True)
+    signature = peewee.BlobField(null=True)
 
     class Meta:
         database = database
