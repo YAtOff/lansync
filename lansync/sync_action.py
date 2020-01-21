@@ -141,10 +141,10 @@ def download(
             with atomic():
                 for chunk in self.chunks:
                     local_node.write_chunk(chunk, result)
-                    market.provide_chunk(self.chunk_hash)
-            available_chunks.add(self.hash)
+                market.provide_chunk(self.chunk_hash)
+            available_chunks.add(self.chunk_hash)
 
-            chunk_consumers = set(market.find_consumers(self.chunks_hash))
+            chunk_consumers = set(market.find_consumers(self.chunk_hash))
             client = client_pool.try_aquire_peer(
                 peer
                 for peer in peer_registry.iter_peers(session.namespace)
@@ -154,6 +154,7 @@ def download(
                 tasks.submit(ExchangeMarketTask(client, market, session))
 
         def on_error(self, error):
+            logging.error("[CHUNK] Error downloading chunk: %r", error)
             _, chunks = self.context
             needed_chunks.add(chunks[0].hash)
 
