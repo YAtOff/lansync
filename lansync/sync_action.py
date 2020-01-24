@@ -152,12 +152,15 @@ def download(
             available_chunks.add(self.chunk_hash)
 
             chunk_consumers = set(market.find_consumers(self.chunk_hash))
-            client = client_pool.try_aquire_peer(
-                peer
-                for peer in peer_registry.iter_peers(session.namespace)
-                if peer.device_id in chunk_consumers
-            )
-            if client is not None:
+            clients = list(client_pool.try_aquire_peers(
+                (
+                    peer
+                    for peer in peer_registry.iter_peers(session.namespace)
+                    if peer.device_id in chunk_consumers
+                ),
+                max_count=1
+            ))
+            for client in clients:
                 tasks.submit(ExchangeMarketTask(client, market, session))
 
         def on_error(self, error):

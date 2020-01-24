@@ -30,6 +30,7 @@ def main(namespace: str, root_folder: str, once: bool):
         run_server(on_start=on_server_start)
 
         worker = SyncWorker(session)
+        session.sync_worker = worker
         if once:
             worker.run_once()
         else:

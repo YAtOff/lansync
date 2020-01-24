@@ -11,6 +11,7 @@ from werkzeug.serving import make_server, run_simple
 
 from lansync.models import NodeChunk
 from lansync.market import Market
+from lansync.session import instance as session
 
 
 certs_dir = Path.cwd() / "certs"
@@ -22,7 +23,10 @@ app = Flask(__name__)
 @app.route("/market/<namespace_name>/<key>", methods=["POST"])
 def exchange(namespace_name, key):
     market = Market.load_from_file(request.stream)
+    own_market_exists = Market.load_from_db(namespace_name, key) is not None
     market.exchange_with_db()
+    if not own_market_exists:
+        session.sync_worker.schedule_event("scheduled_sync")
     fd = BytesIO()
     market.dump_to_file(fd)
     fd.seek(os.SEEK_SET)
@@ -46,7 +50,6 @@ def chunk(namespace_name, content_hash):
 
 def run(app, debug=False, on_start: Callable[[int], None] = None):
     options: Dict[str, Any] = {}
-    options.setdefault("threaded", True)
     options.setdefault("threaded", True)
     options.setdefault(
         "ssl_context", (os.fspath(certs_dir / "alpha.crt"), os.fspath(certs_dir / "alpha.key"),)

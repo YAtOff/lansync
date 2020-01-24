@@ -62,12 +62,15 @@ class ClientPool:
             except IndexError:
                 return None
 
-    def try_aquire_peer(self, peers: Iterable[Peer]) -> Optional[Client]:
+    def try_aquire_peers(self, peers: Iterable[Peer], max_count: int = 1) -> Iterable[Client]:
+        aquired_count = 0
         for peer in peers:
+            if aquired_count == max_count:
+                break
             client = self.aquire(peer)
             if client is not None:
-                return client
-        return None
+                yield client
+                aquired_count += 1
 
     def release(self, client: Client):
         with self.lock:

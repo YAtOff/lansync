@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from uuid import uuid4
 from typing import List, Tuple, Callable, Optional
 
+import mong  # type: ignore
 import peewee  # type: ignore
 
 from lansync.database import database, atomic
@@ -26,7 +26,10 @@ class Device(peewee.Model):
     def default_device_id(cls) -> str:
         device = cls.select().first()
         if device is None:
-            device = cls.create(device_id=uuid4().hex)
+            device_id = mong.get_random_name()
+            while cls.select().where(cls.device_id == device_id).exists():
+                device_id = mong.get_random_name()
+            device = cls.create(device_id=device_id)
         return device.device_id
 
 

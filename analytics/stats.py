@@ -28,8 +28,9 @@ download_chunk_events = pd.DataFrame.from_dict(download_chunk_raw_events)
 exchange_market_events = pd.DataFrame.from_dict(exchange_market_raw_events)
 
 download_chunk_events.drop(["namespace", "event"], axis=1, inplace=True)
-exchange_market_events.drop(["namespace", "event"], axis=1, inplace=True)
+exchange_market_events.drop(["namespace", "key", "checksum", "event"], axis=1, inplace=True)
 
+download_chunk_events["size"] = download_chunk_events["size"].apply(lambda s: s // (1024 * 1024))
 # %%
 
 download_chunk_events.groupby("to_peer")["size"].sum()
@@ -39,4 +40,7 @@ download_chunk_events.groupby("from_peer")["size"].sum()
 
 
 # %%
-exchange_market_events.groupby("to_peer").head()
+exchange_market_events.groupby("to_peer").count()
+
+
+# %%

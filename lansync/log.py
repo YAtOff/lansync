@@ -12,7 +12,10 @@ def configure_logging(device_id: str):
         "version": 1,
         "disable_existing_loggers": True,
         "formatters": {
-            "default": {"format": "%(asctime)s\t%(threadName)s\t%(levelname)s\t%(message)s"},
+            "default": {
+                "format": f"%(asctime)s {device_id} %(message)s",
+                "datefmt": "%H:%M:%S"
+            },
             "stats": {"format": "%(message)s"}
         },
         "handlers": {
