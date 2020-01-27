@@ -31,7 +31,7 @@ class Client:
         url = f"https://{self.peer.address}:{self.peer.port}/chunk/{namespace}/{hash}"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", urllib3.exceptions.SubjectAltNameWarning)
-            response = self.session.get(url)
+            response = self.session.get(url, stream=False)
         response.raise_for_status()
         return response.content
 
@@ -39,7 +39,7 @@ class Client:
         url = f"https://{self.peer.address}:{self.peer.port}/market/{market.namespace}/{market.key}"
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", urllib3.exceptions.SubjectAltNameWarning)
-            response = self.session.post(url, data=market.dump())
+            response = self.session.post(url, data=market.dump(), stream=False)
         if response.status_code == 200:
             return Market.load(response.content)
         return None

@@ -1,5 +1,7 @@
 import abc
-from concurrent.futures import Executor, Future, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import (
+    Executor, Future, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+)
 from threading import RLock
 from typing import Dict, List
 
@@ -53,7 +55,7 @@ class TaskList:
     def wait_any(self) -> List[Task]:
         with self.lock:
             completed_tasks = []
-            completed, _ = wait(self.futures)
+            completed, _ = wait(self.futures, return_when=FIRST_COMPLETED)
             for future in completed:
                 self.futures.remove(future)
                 task = self.tasks.pop(id(future))

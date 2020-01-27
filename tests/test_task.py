@@ -26,7 +26,10 @@ class StubTask(Task):
 
 class SyncExecutor(Executor):
     def submit(self, fn, *args, **kwargs):
+        lazy = kwargs.pop("lazy", False)
         f = Future()
+        if lazy:
+            return f
         try:
             f.set_result(fn(*args, **kwargs))
         except Exception as err:
@@ -81,6 +84,16 @@ def test_task_list_executes_tasks_and_waits_for_result():
 
     assert task.result == result
 
+
+def test_task_list_executes_tasks_and_waits_for_first_completed():
+    task_list = TaskList(SyncExecutor())
+    result = 1
+    task = StubTask({"result": result})
+    task_list.submit(task)
+    task_list.submit(StubTask({"result": result + 1}), lazy=True)
+    task_list.wait_any()
+
+    assert task.result == result
 
 def test_task_list_can_wait_for_all_tasks():
     task_list = TaskList(SyncExecutor())

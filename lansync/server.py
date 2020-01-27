@@ -7,11 +7,15 @@ from typing import Callable, Dict, Any
 
 from flask import Flask, jsonify, request, send_file
 
-from werkzeug.serving import make_server, run_simple
+from werkzeug.serving import make_server, run_simple, WSGIRequestHandler
 
 from lansync.models import NodeChunk
 from lansync.market import Market
 from lansync.session import instance as session
+
+
+class WSGIRequestHandlerHTTP11(WSGIRequestHandler):
+    protocol_version = "HTTP/1.0"
 
 
 certs_dir = Path.cwd() / "certs"
@@ -54,6 +58,7 @@ def run(app, debug=False, on_start: Callable[[int], None] = None):
     options.setdefault(
         "ssl_context", (os.fspath(certs_dir / "alpha.crt"), os.fspath(certs_dir / "alpha.key"),)
     )
+    options.setdefault("request_handler", WSGIRequestHandlerHTTP11)
 
     host = "0.0.0.0"
     port = 0
