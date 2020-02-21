@@ -1,5 +1,5 @@
 from base64 import b64decode
-from dataclasses import asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List
 
@@ -7,8 +7,17 @@ import librsync
 from rschunks.chunk import read_chunks_from_file, update_chunks
 from rschunks.delta import parse_delta_from_file
 
-from lansync.common import NodeChunk
-from lansync.util.file import create_temp_file
+from lansync.util.file import create_temp_file, buffer_checksum
+
+
+@dataclass
+class NodeChunk:
+    offset: int
+    size: int
+    hash: str
+
+    def check(self, data: bytes):
+        assert len(data) == self.size and buffer_checksum(data) == self.hash
 
 
 def calc_initial_chunks(path: str) -> List[NodeChunk]:

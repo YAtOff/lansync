@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import logging
 import socket
@@ -8,9 +9,11 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from random import randint
-from typing import Dict, Set, Optional, Sequence, List
+from typing import Dict, Set, Optional, Sequence, List, Iterable, Tuple
 
+import peewee  # type: ignore
 from dynaconf import settings  # type: ignore
 from pydantic import BaseModel
 
@@ -31,7 +34,11 @@ class Peer:
     def __post_init__(self):
         self.timestamp = datetime.now()
 
-    def touch(self):
+    def update(self, address: str, port: int):
+        if (self.address, self.port) != (address, port):
+            self.address = address
+            self.port = port
+            logging.info("[DISCOVERY] peer changed location: %r", self)
         self.timestamp = datetime.now()
 
 
@@ -39,6 +46,10 @@ class PeerRegistry:
     def __init__(self):
         self.peers: Dict[str, Dict[str, Peer]] = {}
         self.lock = threading.RLock()
+
+    def load_peers(self, peers: Iterable[Tuple[str, Peer]]):
+        for namespace, peer in peers.items():
+            self.peers[namespace][peer.device_id] = peer
 
     def handle_discovery_message(self, address: str, msg: DiscoveryMessage) -> None:
         with self.lock:
@@ -49,7 +60,7 @@ class PeerRegistry:
                 self.peers[msg.namespace][msg.device_id] = peer
                 logging.info("[DISCOVERY] new peer joined: %r", peer)
             else:
-                peer.touch()
+                peer.update(address, msg.port)
 
     def peers_for_namespace(self, namespace: str) -> List[Peer]:
         return list(self.peers.get(namespace, {}).values())
@@ -64,7 +75,7 @@ class PeerRegistry:
         return [
             p
             for p in self.peers.get(namespace, {}).values()
-            if now - p.timestamp < timedelta(minutes=5)
+            if now - p.timestamp < timedelta(seconds=settings.DISCOVERY_PING_INTERVAL * 3)
         ]
 
     def iter_peers(self, namespace: str):
@@ -136,5 +147,59 @@ class Sender:
 
 
 def run_discovery_loop(device_id: str, namespace: str, port: int, peer_registry: PeerRegistry):
-    Receiver.run_in_thread(device_id, peer_registry)
-    Sender.run_in_thread(DiscoveryMessage(device_id=device_id, namespace=namespace, port=port))
+    with open_database([CachedPeer]):
+        Receiver.run_in_thread(device_id, peer_registry)
+        Sender.run_in_thread(DiscoveryMessage(device_id=device_id, namespace=namespace, port=port))
+
+
+database = peewee.DatabaseProxy()
+
+
+class CachedPeer(peewee.Model):
+    id = peewee.AutoField()
+    namespace = peewee.CharField()
+    address = peewee.CharField()
+    port = peewee.IntegerField()
+    device_id = peewee.CharField(unique=True)
+    timestamp = peewee.DateTimeField()
+
+    class Meta:
+        database = database
+
+    @classmethod
+    def touch(cls, namespace: str, peer: Peer):
+        cached_peer, _ = cls.get_or_create(
+            namespace=namespace,
+            device_id=peer.device_id,
+            defaults={
+                "address": peer.address,
+                "port": peer.port,
+                "timestamp": peer.timestamp
+            }
+        )
+
+    @classmethod
+    def load_peers(cls) -> Sequence[Peer]:
+        peers = cls.select().where(
+            cls.timestamp > datetime.now() - timedelta(seconds=settings.DISCOVERY_PING_INTERVAL * 3)
+        )
+        return [
+            (p.namespace, Peer(address=p.address, port=p.port, device_id=p.device_id, timestamp=p.timestamp))
+            for p in peers
+        ]
+
+
+@contextmanager
+def open_database(models=None):
+    path = settings.DISCOVERY_CACHE_DB
+    database_exists = path != ":memory:" and Path(path).exists()
+    database.initialize(
+        peewee.SqliteDatabase(path, pragmas={"foreign_keys": 1, "journal_mode": "wal"})
+    )
+    try:
+        database.connect()
+        if not database_exists and models is not None:
+            database.create_tables(models)
+        yield database
+    finally:
+        database.close()

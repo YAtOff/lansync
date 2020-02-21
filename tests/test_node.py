@@ -7,7 +7,6 @@ from unittest.mock import Mock
 import pytest
 from faker import Faker, providers
 
-from lansync import common
 from lansync.database import open_database
 from lansync.discovery import Peer
 from lansync.models import Chunk, NodeChunk, StoredNode, all_models

@@ -10,6 +10,7 @@ import urllib3.exceptions  # type: ignore
 
 from lansync.discovery import Peer
 from lansync.market import Market
+from lansync.node import RemoteNode
 
 cert_file = os.fspath(Path.cwd() / "certs" / "alpha.crt")
 
@@ -32,7 +33,7 @@ class Client:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", urllib3.exceptions.SubjectAltNameWarning)
             response = self.session.get(url, stream=False)
-        response.raise_for_status()
+            response.raise_for_status()
         return response.content
 
     def exchange_market(self, market: Market) -> Optional[Market]:
@@ -43,6 +44,13 @@ class Client:
         if response.status_code == 200:
             return Market.load(response.content)
         return None
+
+    def exchange_node(self, remote_node: RemoteNode):
+        url = f"https://{self.peer.address}:{self.peer.port}/node/{remote_node.namespace}"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", urllib3.exceptions.SubjectAltNameWarning)
+            response = self.session.post(url, json=remote_node.dump(), stream=False)
+            response.raise_for_status()
 
 
 class ClientPool:

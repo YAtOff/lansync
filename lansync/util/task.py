@@ -2,6 +2,7 @@ import abc
 from concurrent.futures import (
     Executor, Future, ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 )
+import logging
 from threading import RLock
 from typing import Dict, List
 
@@ -30,6 +31,7 @@ class Task(abc.ABC):
         try:
             self.on_done(future.result())
         except Exception as error:
+            logging.exception("Error in task")
             self.on_error(error)
         finally:
             self.cleanup()

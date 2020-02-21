@@ -9,8 +9,7 @@ import peewee  # type: ignore
 
 from lansync.database import database, atomic
 from lansync.session import Session
-from lansync import common
-from lansync.util.db_fields import JSONField
+from lansync.chunk import NodeChunk as NodeChunkDTO
 from lansync.util.misc import all_subclasses
 from lansync.util.file import read_chunk
 
@@ -89,7 +88,7 @@ class StoredNode(peewee.Model):
         return Path(self.root_folder.path) / self.path
 
     @property
-    def chunks(self) -> List[common.NodeChunk]:
+    def chunks(self) -> List[NodeChunkDTO]:
         chunks = (
             NodeChunk.select()
             .join(Chunk, on=(NodeChunk.chunk == Chunk.id))
@@ -97,7 +96,7 @@ class StoredNode(peewee.Model):
             .where(NodeChunk.node == self)
         )
         return [
-            common.NodeChunk(hash=c.chunk.hash, size=c.chunk.size, offset=c.offset) for c in chunks
+            NodeChunkDTO(hash=c.chunk.hash, size=c.chunk.size, offset=c.offset) for c in chunks
         ]
 
     def sync_with_local(self, local_node):
@@ -134,7 +133,7 @@ class NodeChunk(peewee.Model):
         database = database
 
     @classmethod
-    def update_or_create(cls, node: StoredNode, chunk: common.NodeChunk) -> NodeChunk:
+    def update_or_create(cls, node: StoredNode, chunk: NodeChunkDTO) -> NodeChunk:
         with atomic():
             chunk_db_instance = Chunk.update_or_create(chunk.hash, chunk.size)
             node_chunk, _ = cls.get_or_create(
@@ -148,7 +147,7 @@ class NodeChunk(peewee.Model):
     @classmethod
     def find(
         cls, namespace: str, hash: str
-    ) -> Optional[Tuple[common.NodeChunk, Callable[[], bytes]]]:
+    ) -> Optional[Tuple[NodeChunkDTO, Callable[[], bytes]]]:
         try:
             namespace = Namespace.by_name(namespace)
             node_chunk = (
@@ -160,7 +159,7 @@ class NodeChunk(peewee.Model):
             )
             return (
                 (
-                    common.NodeChunk(
+                    NodeChunkDTO(
                         hash=node_chunk.chunk.hash,
                         size=node_chunk.chunk.size,
                         offset=node_chunk.offset,
@@ -174,33 +173,6 @@ class NodeChunk(peewee.Model):
             )
         except peewee.DoesNotExist:
             return None
-
-
-class RemoteNode(peewee.Model):
-    id = peewee.AutoField()
-    namespace = peewee.ForeignKeyField(Namespace, on_delete="CASCADE")
-    key = peewee.CharField(index=True)
-    sequence_number = peewee.IntegerField(index=True)
-    path = peewee.CharField()
-    timestamp = peewee.CharField()
-    checksum = peewee.CharField(null=True)
-    chunks = JSONField(null=True)
-    size = peewee.IntegerField()
-    signature = peewee.TextField()
-
-    class Meta:
-        database = database
-
-    def updated(self, stored: StoredNode) -> bool:
-        return self.checksum != stored.checksum
-
-    @classmethod
-    def max_sequence_number(cls, namespace: Namespace) -> int:
-        return (
-            cls.select(peewee.fn.Max(cls.sequence_number))
-            .where(cls.namespace == namespace)
-            .scalar()
-        )
 
 
 class Market(peewee.Model):

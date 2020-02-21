@@ -7,10 +7,9 @@ class NodeChunkSerializer(Schema):
     offset = fields.Integer()
 
 
-class NodeEventSerializer(Schema):
+class RemoteNodeSerializer(Schema):
+    namespace = fields.Str()
     key = fields.Str()
-    operation = fields.Str()
-    sequence_number = fields.Integer(allow_none=True)
     path = fields.Str()
     timestamp = fields.Str()
     checksum = fields.Str(allow_none=True)

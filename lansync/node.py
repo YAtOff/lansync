@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 from base64 import b64encode
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Set, Union
 from uuid import uuid4
@@ -14,16 +14,57 @@ from typing_extensions import Literal
 
 import librsync  # type: ignore
 
-from lansync.chunk import calc_initial_chunks, calc_new_chunks
-from lansync.common import NodeChunk
+from lansync.chunk import NodeChunk, calc_initial_chunks, calc_new_chunks
 from lansync.database import atomic
 from lansync.models import Namespace
 from lansync.models import NodeChunk as NodeChunkModel
-from lansync.models import RemoteNode, RootFolder, StoredNode
+from lansync.models import RootFolder, StoredNode
 from lansync.session import Session
-from lansync.util.file import (create_file_placeholder, create_temp_file, file_checksum, hash_path,
-                               read_chunk, write_chunk)
+from lansync.serializers import RemoteNodeSerializer
+from lansync.util.file import (
+    create_file_placeholder, create_temp_file,
+    file_checksum, hash_path,
+    read_chunk, write_chunk
+)
 from lansync.util.misc import index_by
+from lansync.util.timeutil import now_as_iso
+
+
+@dataclass
+class RemoteNode:
+    namespace: str
+    key: str
+    path: str
+    timestamp: str
+    checksum: str
+    size: int
+    chunks: List[NodeChunk]
+    signature: str
+
+    @classmethod
+    def create(
+        cls, namespace: str, local_node: LocalNode,
+        chunks: List[NodeChunk], signature: str
+    ) -> RemoteNode:
+        return cls(
+            namespace=namespace,
+            key=local_node.key,
+            path=local_node.path,
+            timestamp=now_as_iso(),
+            checksum=local_node.checksum,
+            size=local_node.size,
+            chunks=chunks,
+            signature=signature
+        )
+
+    @classmethod
+    def load(cls, data: Dict) -> RemoteNode:
+        data = RemoteNodeSerializer().load(data)
+        chunks = [NodeChunk(**c) for c in data.pop("chunks")]
+        return cls(chunks=chunks, **data)
+
+    def dump(self) -> Dict:
+        return RemoteNodeSerializer().dump(asdict(self))
 
 
 @dataclass
@@ -118,10 +159,11 @@ class LocalNode:
 class FullNode(NamedTuple):
     stored_node: StoredNode
     local_node: LocalNode
+    remote_node: RemoteNode
     all_chunks: List[NodeChunk]
     chunk_index: Dict[str, List[NodeChunk]]
     needed_chunks: Set[str]
-    available_chunk: Set[str]
+    available_chunks: Set[str]
 
 
 def store_new_node(
@@ -159,8 +201,11 @@ def store_new_node(
         new_node.save()
 
         chunk_index = index_by("hash")(chunks)
+
+        remote_node = RemoteNode.create(session.namespace, local_node, chunks, signature)
         return FullNode(
-            new_node, local_node, chunks, chunk_index, set(), set(chunk_index.keys())
+            new_node, local_node, remote_node,
+            chunks, chunk_index, set(), set(chunk_index.keys())
         )
 
 
@@ -168,7 +213,7 @@ def create_node_placeholder(remote_node: RemoteNode, session: Session) -> FullNo
     with atomic():
         temp_path = str(uuid4())
         stored_node = StoredNode.create(
-            namespace=remote_node.namespace,
+            namespace=Namespace.by_name(remote_node.namespace),
             root_folder=RootFolder.for_session(session),
             key=hash_path(temp_path),
             path=temp_path,
@@ -183,7 +228,7 @@ def create_node_placeholder(remote_node: RemoteNode, session: Session) -> FullNo
             stored_node.local_path, stored_node.size, session
         )
 
-        all_chunks = [NodeChunk(**c) for c in remote_node.chunks]
+        all_chunks = remote_node.chunks
         chunk_index = index_by("hash")(all_chunks)
         needed_chunks: Set[str] = set()
         available_chunks: Set[str] = set()
@@ -208,4 +253,7 @@ def create_node_placeholder(remote_node: RemoteNode, session: Session) -> FullNo
         shutil.move(local_node.local_path, stored_node.local_path)
         local_node = LocalNode.create(stored_node.local_path, session)
 
-        return FullNode(stored_node, local_node, all_chunks, chunk_index, needed_chunks, available_chunks)
+        return FullNode(
+            stored_node, local_node, remote_node,
+            all_chunks, chunk_index, needed_chunks, available_chunks
+        )

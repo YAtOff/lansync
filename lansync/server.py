@@ -12,6 +12,8 @@ from werkzeug.serving import make_server, run_simple, WSGIRequestHandler
 from lansync.models import NodeChunk
 from lansync.market import Market
 from lansync.session import instance as session
+from lansync.node import RemoteNode
+from lansync.util.http import error_response
 
 
 class WSGIRequestHandlerHTTP11(WSGIRequestHandler):
@@ -24,8 +26,16 @@ certs_dir = Path.cwd() / "certs"
 app = Flask(__name__)
 
 
+@app.route("/node/<namespace_name>", methods=["POST"])
+def exchange_node(namespace_name):
+    if not request.is_json:
+        return error_response(406)
+    session.receive_queue.put(RemoteNode.load(request.get_json()))
+    return jsonify({"ok": True})
+
+
 @app.route("/market/<namespace_name>/<key>", methods=["POST"])
-def exchange(namespace_name, key):
+def exchange_market(namespace_name, key):
     market = Market.load_from_file(request.stream)
     own_market_exists = Market.load_from_db(namespace_name, key) is not None
     market.exchange_with_db()

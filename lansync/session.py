@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from queue import Queue
 from pathlib import Path
 from typing import Any
 
@@ -27,11 +28,11 @@ class RootFolder:
 class Session:
     namespace: str
     root_folder: RootFolder
-    remote_server_url: str
     device_id: str
     peer_registry: PeerRegistry
     client_pool: Any
     stats: Stats
+    receive_queue: Queue
 
     @classmethod
     def create(cls, namespace: str, root_folder: str, device_id: str) -> Session:
@@ -40,11 +41,11 @@ class Session:
         return cls(
             namespace=namespace,
             root_folder=RootFolder.create(root_folder),
-            remote_server_url=settings.REMOTE_SERVER_URL,
             device_id=device_id,
             peer_registry=PeerRegistry(),
             client_pool=ClientPool(settings.CLIENTS_PER_PEER),
-            stats=Stats(device_id)
+            stats=Stats(device_id),
+            receive_queue=Queue()
         )
 
 
