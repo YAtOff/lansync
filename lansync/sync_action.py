@@ -17,7 +17,7 @@ def send(
     new_node = store_new_node(local_node, session, stored_node)
 
     # Create market for new node and exchange with all
-    peers = session.peer_registry.peers_for_namespace(session.namespace)
+    peers = session.peer_registry.live_peers(session.namespace)
     market = NodeMarket.for_file_provider(
         namespace=session.namespace,
         key=f"{local_node.key}:{local_node.checksum}",
@@ -43,7 +43,7 @@ def receive(
 ):
     logging.info("[CHUNK] Downloading node [%s]", remote_node.path)
     peer_registry = session.peer_registry
-    if peer_registry.empty:
+    if peer_registry.empty(session.namespace):
         return
     client_pool = session.client_pool
     device_id = session.device_id
@@ -62,7 +62,7 @@ def receive(
         namespace=session.namespace,
         key=f"{remote_node.key}:{remote_node.checksum}",
         device_id=device_id,
-        peers=[peer.device_id for peer in peer_registry.peers_for_namespace(session.namespace)],
+        peers=[peer.device_id for peer in peer_registry.live_peers(session.namespace)],
         chunk_hashes=needed_chunks | available_chunks
     )
     for chunk_hash in available_chunks:

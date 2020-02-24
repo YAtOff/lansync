@@ -8,8 +8,9 @@ from typing import Any
 
 from dynaconf import settings  # type: ignore
 
-from lansync.centralized_discovery import PeerRegistry
-# from lansync.discovery import PeerRegistry
+from lansync.peer import PeerRegistry
+from lansync.centralized_discovery import CentrailzedPeerRegistry
+from lansync.broadcast_discovery import BroadcastPeerRegistry
 from lansync.stats import Stats
 from lansync.util.lazy_object import LazyObject
 
@@ -43,7 +44,8 @@ class Session:
             namespace=namespace,
             root_folder=RootFolder.create(root_folder),
             device_id=device_id,
-            peer_registry=PeerRegistry(),
+            peer_registry=CentrailzedPeerRegistry(device_id) if settings.USE_CENTRALIZED_PEER_REGISTRY
+            else BroadcastPeerRegistry(device_id),
             client_pool=ClientPool(settings.CLIENTS_PER_PEER),
             stats=Stats(device_id),
             receive_queue=Queue()

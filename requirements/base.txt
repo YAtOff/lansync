@@ -2,7 +2,6 @@
 -e ./librsync
 -e ./rschunks
 Click==7.0
-Flask==1.1.1
 requests==2.22.0
 requests-toolbelt==0.9.1
 sseclient-py==1.7
@@ -15,3 +14,4 @@ marshmallow==3.3.0
 fastavro==0.22.9
 pytz==2019.3
 mong==0.0.1
+sanic==19.12.2

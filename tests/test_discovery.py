@@ -2,7 +2,10 @@ from datetime import datetime
 
 from faker import Faker, providers
 
-from lansync.discovery import DiscoveryMessage, PeerRegistry, Peer
+from lansync.peer import Peer
+from lansync.broadcast_discovery import (
+    DiscoveryMessage, BroadcastPeerRegistry as PeerRegistry
+)
 
 fake = Faker()
 fake.add_provider(providers.internet)
@@ -20,7 +23,7 @@ def create_peer_params():
 
 
 def test_discovery_message_handling():
-    registry = PeerRegistry()
+    registry = PeerRegistry(fake.hostname())
     device_id, namespace, ip, port = create_peer_params()
     registry.handle_discovery_message(
         ip, DiscoveryMessage(device_id=device_id, namespace=namespace, port=port)
@@ -30,7 +33,7 @@ def test_discovery_message_handling():
 
 
 def test_peer_choose():
-    registry = PeerRegistry()
+    registry = PeerRegistry(fake.hostname())
     device_id, namespace, ip, port = create_peer_params()
     registry.handle_discovery_message(
         ip, DiscoveryMessage(device_id=device_id, namespace=namespace, port=port)
@@ -44,7 +47,7 @@ def test_peer_choose():
 
 
 def test_peer_iteration():
-    registry = PeerRegistry()
+    registry = PeerRegistry(fake.hostname())
     namespace = fake.hostname()
     peer_params = [create_peer_params() for _ in range(5)]
     for device_id, _, ip, port in peer_params:

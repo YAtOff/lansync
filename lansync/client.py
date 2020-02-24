@@ -8,7 +8,7 @@ import requests
 from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter  # type: ignore
 import urllib3.exceptions  # type: ignore
 
-from lansync.discovery import Peer
+from lansync.peer import Peer
 from lansync.market import Market
 from lansync.node import RemoteNode
 

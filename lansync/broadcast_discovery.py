@@ -6,13 +6,13 @@ import socket
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from random import randint
-from typing import Dict, Set, Optional, Sequence, List
+from typing import Dict, Sequence
 
 from dynaconf import settings  # type: ignore
 from pydantic import BaseModel
+
+from lansync.peer import Peer, PeerRegistry
 
 
 class DiscoveryMessage(BaseModel):
@@ -21,28 +21,10 @@ class DiscoveryMessage(BaseModel):
     port: int
 
 
-@dataclass
-class Peer:
-    address: str
-    port: int
-    device_id: str
-    timestamp: datetime = field(init=False)
-
-    def __post_init__(self):
-        self.timestamp = datetime.now()
-
-    def update(self, address: str, port: int):
-        if (self.address, self.port) != (address, port):
-            self.address = address
-            self.port = port
-            logging.info("[DISCOVERY] peer changed location: %r", self)
-        self.timestamp = datetime.now()
-
-
-class PeerRegistry:
-    def __init__(self):
+class BroadcastPeerRegistry(PeerRegistry):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.peers: Dict[str, Dict[str, Peer]] = {}
-        self.lock = threading.RLock()
 
     def handle_discovery_message(self, address: str, msg: DiscoveryMessage) -> None:
         with self.lock:
@@ -55,14 +37,6 @@ class PeerRegistry:
             else:
                 peer.update(address, msg.port)
 
-    def peers_for_namespace(self, namespace: str) -> List[Peer]:
-        return list(self.peers.get(namespace, {}).values())
-
-    def choose(self, namespace: str) -> Optional[Peer]:
-        with self.lock:
-            live_peers = self.live_peers(namespace)
-            return live_peers[randint(0, len(live_peers) - 1)] if live_peers else None
-
     def live_peers(self, namespace: str) -> Sequence[Peer]:
         now = datetime.now()
         return [
@@ -70,22 +44,6 @@ class PeerRegistry:
             for p in self.peers.get(namespace, {}).values()
             if now - p.timestamp < timedelta(seconds=settings.DISCOVERY_PING_INTERVAL * 3)
         ]
-
-    def iter_peers(self, namespace: str):
-        checked_peers: Set[str] = set()
-        while True:
-            live_peers = self.live_peers(namespace)
-            peers = [p for p in live_peers if p.device_id not in checked_peers]
-            if not peers:
-                return
-
-            peer = peers[randint(0, len(peers) - 1)]
-            yield peer
-            checked_peers.add(peer.device_id)
-
-    @property
-    def empty(self) -> bool:
-        return len(self.peers) == 0
 
 
 class Receiver:

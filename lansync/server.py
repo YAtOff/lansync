@@ -1,13 +1,13 @@
-from io import BytesIO
+import asyncio
 import logging
 import os
 from pathlib import Path
-import threading
-from typing import Callable, Dict, Any
+import socket
+from threading import Thread
+import time
 
-from flask import Flask, jsonify, request, send_file
-
-from werkzeug.serving import make_server, run_simple, WSGIRequestHandler
+# from flask import Flask, jsonify, request, send_file
+from sanic import Sanic, response  # type: ignore
 
 from lansync.models import NodeChunk
 from lansync.market import Market
@@ -16,74 +16,114 @@ from lansync.node import RemoteNode
 from lansync.util.http import error_response
 
 
-class WSGIRequestHandlerHTTP11(WSGIRequestHandler):
-    protocol_version = "HTTP/1.0"
-
-
 certs_dir = Path.cwd() / "certs"
 
-
-app = Flask(__name__)
+app = Sanic(__name__)
+app.config.KEEP_ALIVE = True
+app.config.KEEP_ALIVE_TIMEOUT = 300
 
 
 @app.route("/node/<namespace_name>", methods=["POST"])
-def exchange_node(namespace_name):
-    if not request.is_json:
-        return error_response(406)
-    session.receive_queue.put(RemoteNode.load(request.get_json()))
-    return jsonify({"ok": True})
+def exchange_node(request, namespace_name):
+    session.receive_queue.put(RemoteNode.load(request.json))
+    return response.json({"ok": True})
 
 
 @app.route("/market/<namespace_name>/<key>", methods=["POST"])
-def exchange_market(namespace_name, key):
-    market = Market.load_from_file(request.stream)
+def exchange_market(request, namespace_name, key):
+    market = Market.load(request.body)
     market.exchange_with_db()
-    fd = BytesIO()
-    market.dump_to_file(fd)
-    fd.seek(os.SEEK_SET)
-    return send_file(fd, mimetype="application/octet-stream")
+    return response.raw(market.dump(), content_type="application/octet-stream")
 
 
 @app.route("/chunk/<namespace_name>/<content_hash>", methods=["GET", "HEAD"])
-def chunk(namespace_name, content_hash):
+def chunk(request, namespace_name, content_hash):
     node_chunk_pair = NodeChunk.find(namespace_name, content_hash)
     if node_chunk_pair is None:
-        return jsonify({"ok": False, "error": "Not found"}), 404
+        return error_response(404)
 
     chunk, read_chunk = node_chunk_pair
 
     if request.method == "HEAD":
-        return "", 200
+        return response.empty()
 
-    fd = BytesIO(read_chunk())
-    return send_file(fd, mimetype="application/octet-stream")
-
-
-def run(app, debug=False, on_start: Callable[[int], None] = None):
-    options: Dict[str, Any] = {}
-    options.setdefault("threaded", True)
-    options.setdefault(
-        "ssl_context", (os.fspath(certs_dir / "alpha.crt"), os.fspath(certs_dir / "alpha.key"),)
-    )
-    options.setdefault("request_handler", WSGIRequestHandlerHTTP11)
-
-    host = "0.0.0.0"
-    port = 0
-
-    if debug:
-        options.setdefault("use_reloader", debug)
-        options.setdefault("use_debugger", debug)
-        run_simple(host, port, app, **options)  # ???
-    else:
-        server = make_server(host, port, app, **options)
-        _, port = server.server_address
-
-        logging.info("Serving on port: %d", port)
-        if on_start is not None:
-            on_start(port)
-
-        server.serve_forever()
+    return response.raw(read_chunk(), content_type="application/octet-stream")
 
 
-def run_in_thread(debug=False, on_start: Callable[[int], None] = None):
-    threading.Thread(target=run, args=(app, debug, on_start), daemon=True).start()
+def create_socket(host=None, port=None):
+    address = (host or "0.0.0.0", port or 0)
+    completed = False
+    try:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except socket.error:
+            # Assume it's a bad family/type/protocol combination.
+            logging.warning(
+                "[SERVER] create_server() failed to create socket.socket(%r, %r)",
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                exc_info=True,
+            )
+            raise
+
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+        if not hasattr(socket, "SO_REUSEPORT"):
+            logging.warning("[SERVER] reuse_port not supported by socket module")
+
+        sock.bind(address)
+        completed = True
+    finally:
+        if not completed and sock:
+            sock.close()
+
+    return sock
+
+
+def asyncio_exception_handler(loop, context):
+    logging.error("Asyncio error: %r", context)
+
+
+class Server:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.host = None
+        self.port = None
+
+    def run(self):
+        sock = create_socket(
+            host=self.kwargs.get("host"),
+            port=self.kwargs.get("port")
+        )
+        host, port = sock.getsockname()
+        self.host = host
+        self.port = port
+        logging.info("[SERVER] running server on port: %d", port)
+
+        ssl = {
+            "cert": os.fspath(certs_dir / "alpha.crt"),
+            "key": os.fspath(certs_dir / "alpha.key")
+        }
+        server_core = app.create_server(
+            sock=sock, access_log=True, ssl=ssl,
+            debug=self.kwargs.get("debug", False),
+            return_asyncio_server=True,
+            asyncio_server_kwargs={
+                "start_serving": False
+            }
+        )
+        loop = asyncio.get_event_loop()
+        async_server = loop.run_until_complete(server_core)
+        try:
+            loop.run_until_complete(async_server.server.serve_forever())
+        finally:
+            async_server.close()
+
+    def run_in_thread(self):
+        def run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.set_exception_handler(asyncio_exception_handler)
+            self.run()
+        Thread(target=run, daemon=True).start()
+        while self.port is None:
+            time.sleep(0.1)

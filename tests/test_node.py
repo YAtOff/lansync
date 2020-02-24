@@ -8,7 +8,7 @@ import pytest
 from faker import Faker, providers
 
 from lansync.database import open_database
-from lansync.discovery import Peer
+from lansync.peer import Peer
 from lansync.models import Chunk, NodeChunk, StoredNode, all_models
 from lansync.node import LocalNode, store_new_node
 from lansync.session import RootFolder

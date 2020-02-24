@@ -1,4 +1,4 @@
-from flask import jsonify
+from sanic import response  # type: ignore
 
 
 messages = {
@@ -8,4 +8,4 @@ messages = {
 
 
 def error_response(code: int, message: str = None):
-    return jsonify({"ok": False, "error": message or messages.get(code)}), code
+    return response.json({"ok": False, "error": message or messages.get(code)}), code

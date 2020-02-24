@@ -1,7 +1,7 @@
 from faker import Faker, providers
 
 from lansync.client import ClientPool
-from lansync.discovery import Peer
+from lansync.peer import Peer
 
 
 fake = Faker()

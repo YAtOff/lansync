@@ -3,7 +3,7 @@ import logging
 
 from typing import NamedTuple
 
-from lansync.discovery import Peer
+from lansync.peer import Peer
 
 
 class EventKey(NamedTuple):

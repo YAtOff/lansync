@@ -4,31 +4,19 @@ import json
 import threading
 import time
 from dataclasses import asdict
-from random import randint
-from typing import Set, Optional, Sequence
+from typing import Sequence
 
 from cached_property import cached_property  # type: ignore
 from dynaconf import settings  # type: ignore
 import redis  # type: ignore
 
-from lansync.discovery import Peer
+from lansync.peer import Peer, PeerRegistry
 
 
 redis_client = redis.Redis()
 
 
-class PeerRegistry:
-    def __init__(self):
-        self.lock = threading.RLock()
-
-    def peers_for_namespace(self, namespace: str) -> Sequence[Peer]:
-        return self.live_peers(namespace)
-
-    def choose(self, namespace: str) -> Optional[Peer]:
-        with self.lock:
-            live_peers = self.live_peers(namespace)
-            return live_peers[randint(0, len(live_peers) - 1)] if live_peers else None
-
+class CentrailzedPeerRegistry(PeerRegistry):
     def live_peers(self, namespace: str) -> Sequence[Peer]:
         peers = []
         cursor = 0
@@ -39,24 +27,7 @@ class PeerRegistry:
             values = redis_client.mget(keys)
             peers.extend([Peer(**json.loads(v)) for v in values])
 
-        return peers
-
-    def iter_peers(self, namespace: str):
-        checked_peers: Set[str] = set()
-        while True:
-            live_peers = self.live_peers(namespace)
-            peers = [p for p in live_peers if p.device_id not in checked_peers]
-            if not peers:
-                return
-
-            peer = peers[randint(0, len(peers) - 1)]
-            yield peer
-            checked_peers.add(peer.device_id)
-
-    @property
-    def empty(self) -> bool:
-        cursor, peers = redis_client.scan(0, "peer:*")
-        return len(peers) == 0
+        return [p for p in peers if p.device_id != self.device_id]
 
 
 class Sender:

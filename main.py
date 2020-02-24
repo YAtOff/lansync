@@ -7,10 +7,10 @@ import click
 from dynaconf import settings  # type: ignore
 
 from lansync.database import open_database
-from lansync.centralized_discovery import run_discovery_loop
-# from lansync.discovery import run_discovery_loop
+from lansync import centralized_discovery
+from lansync import broadcast_discovery
 from lansync.models import Device, StoredNode, all_models
-from lansync.server import run_in_thread as run_server
+from lansync.server import Server
 from lansync.session import Session, instance as session_instance
 from lansync.log import configure_logging
 from lansync.node import LocalNode
@@ -25,11 +25,16 @@ def start_session(namespace: str, root_folder: str):
         logging.info("Starting cleint with device id: %s", device_id)
         session = Session.create(namespace, root_folder, device_id)
         session_instance.configure(session)
-
-        def on_server_start(server_port):
-            run_discovery_loop(device_id, namespace, server_port, session.peer_registry)
-
-        run_server(on_start=on_server_start)
+        server = Server(debug=True)
+        server.run_in_thread()
+        if settings.USE_CENTRALIZED_PEER_REGISTRY:
+            centralized_discovery.run_discovery_loop(
+                device_id, namespace, server.port, session.peer_registry
+            )
+        else:
+            broadcast_discovery.run_discovery_loop(
+                device_id, namespace, server.port, session.peer_registry
+            )
 
         yield session
 
@@ -46,6 +51,8 @@ def cli(ctx):
 @click.argument("filename")
 def send(namespace: str, root_folder: str, filename: str):
     with start_session(namespace, root_folder) as session:
+        if not settings.USE_CENTRALIZED_PEER_REGISTRY:
+            time.sleep(settings.DISCOVERY_PING_INTERVAL * 1.5)
         local_node = LocalNode.create(Path(filename).resolve(), session)
         stored_node = StoredNode.get_or_none(StoredNode.key == local_node.key)
         sync_action.send(local_node, stored_node, session)
