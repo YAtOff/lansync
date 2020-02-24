@@ -37,10 +37,7 @@ def exchange_node(namespace_name):
 @app.route("/market/<namespace_name>/<key>", methods=["POST"])
 def exchange_market(namespace_name, key):
     market = Market.load_from_file(request.stream)
-    own_market_exists = Market.load_from_db(namespace_name, key) is not None
     market.exchange_with_db()
-    if not own_market_exists:
-        session.sync_worker.schedule_event("scheduled_sync")
     fd = BytesIO()
     market.dump_to_file(fd)
     fd.seek(os.SEEK_SET)

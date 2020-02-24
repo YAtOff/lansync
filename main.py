@@ -7,7 +7,8 @@ import click
 from dynaconf import settings  # type: ignore
 
 from lansync.database import open_database
-from lansync.discovery import run_discovery_loop
+from lansync.centralized_discovery import run_discovery_loop
+# from lansync.discovery import run_discovery_loop
 from lansync.models import Device, StoredNode, all_models
 from lansync.server import run_in_thread as run_server
 from lansync.session import Session, instance as session_instance
@@ -45,7 +46,6 @@ def cli(ctx):
 @click.argument("filename")
 def send(namespace: str, root_folder: str, filename: str):
     with start_session(namespace, root_folder) as session:
-        time.sleep(settings.DISCOVERY_PING_INTERVAL * 1.5)
         local_node = LocalNode.create(Path(filename).resolve(), session)
         stored_node = StoredNode.get_or_none(StoredNode.key == local_node.key)
         sync_action.send(local_node, stored_node, session)

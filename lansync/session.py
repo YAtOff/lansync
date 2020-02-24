@@ -8,7 +8,8 @@ from typing import Any
 
 from dynaconf import settings  # type: ignore
 
-from lansync.discovery import PeerRegistry
+from lansync.centralized_discovery import PeerRegistry
+# from lansync.discovery import PeerRegistry
 from lansync.stats import Stats
 from lansync.util.lazy_object import LazyObject
 

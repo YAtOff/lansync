@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import logging
 import socket
@@ -9,11 +8,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from pathlib import Path
 from random import randint
-from typing import Dict, Set, Optional, Sequence, List, Iterable, Tuple
+from typing import Dict, Set, Optional, Sequence, List
 
-import peewee  # type: ignore
 from dynaconf import settings  # type: ignore
 from pydantic import BaseModel
 
@@ -46,10 +43,6 @@ class PeerRegistry:
     def __init__(self):
         self.peers: Dict[str, Dict[str, Peer]] = {}
         self.lock = threading.RLock()
-
-    def load_peers(self, peers: Iterable[Tuple[str, Peer]]):
-        for namespace, peer in peers.items():
-            self.peers[namespace][peer.device_id] = peer
 
     def handle_discovery_message(self, address: str, msg: DiscoveryMessage) -> None:
         with self.lock:
@@ -147,59 +140,5 @@ class Sender:
 
 
 def run_discovery_loop(device_id: str, namespace: str, port: int, peer_registry: PeerRegistry):
-    with open_database([CachedPeer]):
-        Receiver.run_in_thread(device_id, peer_registry)
-        Sender.run_in_thread(DiscoveryMessage(device_id=device_id, namespace=namespace, port=port))
-
-
-database = peewee.DatabaseProxy()
-
-
-class CachedPeer(peewee.Model):
-    id = peewee.AutoField()
-    namespace = peewee.CharField()
-    address = peewee.CharField()
-    port = peewee.IntegerField()
-    device_id = peewee.CharField(unique=True)
-    timestamp = peewee.DateTimeField()
-
-    class Meta:
-        database = database
-
-    @classmethod
-    def touch(cls, namespace: str, peer: Peer):
-        cached_peer, _ = cls.get_or_create(
-            namespace=namespace,
-            device_id=peer.device_id,
-            defaults={
-                "address": peer.address,
-                "port": peer.port,
-                "timestamp": peer.timestamp
-            }
-        )
-
-    @classmethod
-    def load_peers(cls) -> Sequence[Peer]:
-        peers = cls.select().where(
-            cls.timestamp > datetime.now() - timedelta(seconds=settings.DISCOVERY_PING_INTERVAL * 3)
-        )
-        return [
-            (p.namespace, Peer(address=p.address, port=p.port, device_id=p.device_id, timestamp=p.timestamp))
-            for p in peers
-        ]
-
-
-@contextmanager
-def open_database(models=None):
-    path = settings.DISCOVERY_CACHE_DB
-    database_exists = path != ":memory:" and Path(path).exists()
-    database.initialize(
-        peewee.SqliteDatabase(path, pragmas={"foreign_keys": 1, "journal_mode": "wal"})
-    )
-    try:
-        database.connect()
-        if not database_exists and models is not None:
-            database.create_tables(models)
-        yield database
-    finally:
-        database.close()
+    Receiver.run_in_thread(device_id, peer_registry)
+    Sender.run_in_thread(DiscoveryMessage(device_id=device_id, namespace=namespace, port=port))
